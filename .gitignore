@@ -1,0 +1,53 @@
+# ==============================================================================
+# LaTeX Ignore Rules
+# ==============================================================================
+
+# Auxiliary & Build Artifacts
+build/
+*.aux
+*.bbl
+*.blg
+*.brf
+*.bcf
+*.fls
+*.fdb_latexmk
+*.idx
+*.ilg
+*.ind
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.synctex(busy)
+*.toc
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.ist
+*.nav
+*.snm
+*.vrb
+*-blx.bib
+
+# Compiled PDF (Root PDF compiled locally; keep git clean, CI will generate on push)
+# Uncomment the line below if you prefer NOT to track the root compiled PDF in Git:
+# main.pdf
+
+# TeX Live / MiKTeX Temporary Files
+*.dvi
+*.ps
+
+# OS & Editor Specific Files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea/
+*.swp
+*~

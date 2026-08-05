@@ -1,0 +1,32 @@
+\section{Methodology}
+\label{sec:methodology}
+
+We now formalize the \sister{} framework.
+\cref{sec:problem_formulation} defines the mathematical setup, and \cref{sec:algorithm} describes the core algorithm.
+
+\subsection{Problem Formulation}
+\label{sec:problem_formulation}
+Let $\mathcal{X} \subset \R^d$ represent the input space and $\mathcal{Y}$ represent the target space.
+We aim to discover an optimal mapping $f^*: \mathcal{X} \to \mathcal{Y}$ that minimizes the expected risk:
+\begin{equation}
+    \label{eq:objective}
+    f^* = \argmin_{f \in \mathcal{F}} \E_{(x, y) \sim \mathcal{D}} \left[ \mathcal{L}(f(x), y) \right] + \lambda \norm{f}^2,
+\end{equation}
+where $\mathcal{L}(\cdot, \cdot)$ is a smooth loss function and $\lambda > 0$ denotes the regularization hyperparameter.
+
+\subsection{Proposed Algorithm: \sister{}}
+\label{sec:algorithm}
+To solve \cref{eq:objective} efficiently, \sister{} computes iterative updates via:
+\begin{equation}
+    \label{eq:update}
+    \vecs{w}^{(t+1)} = \vecs{w}^{(t)} - \eta_t \nabla \mathcal{L}(\vecs{w}^{(t)}),
+\end{equation}
+where $\eta_t$ represents the step size at step $t$.
+
+\begin{figure}[t]
+    \centering
+    % Replace sample image below with your figure file in figures/
+    \includegraphics[width=0.85\linewidth]{figures/overview.pdf}
+    \caption{System architecture and workflow overview of \sister{}.}
+    \label{fig:overview}
+\end{figure}

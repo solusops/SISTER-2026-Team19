@@ -1,0 +1,30 @@
+\section{Experiments}
+\label{sec:experiments}
+
+In this section, we evaluate \sister{} against state-of-the-art baselines.
+
+\subsection{Experimental Setup}
+\textbf{Datasets}: We test on standard benchmark datasets.
+\textbf{Baselines}: We compare against standard Baseline-A and Baseline-B.
+\textbf{Metrics}: We measure Accuracy (\%), F1-score, and Execution Time (seconds).
+
+\subsection{Main Results}
+Our primary comparative evaluation is presented in \cref{tab:main_results}.
+
+\begin{table}[h]
+    \centering
+    \caption{Performance comparison across benchmark datasets (Mean $\pm$ Std).}
+    \label{tab:main_results}
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Method} & \textbf{Accuracy (\%)} $\uparrow$ & \textbf{F1-Score} $\uparrow$ & \textbf{Time (s)} $\downarrow$ \\
+        \midrule
+        Baseline-A & 82.4 $\pm$ 0.5 & 0.81 & 142.3 \\
+        Baseline-B & 85.1 $\pm$ 0.3 & 0.84 & 98.7 \\
+        \midrule
+        \textbf{\sister{} (Ours)} & \textbf{91.8 $\pm$ 0.2} & \textbf{0.91} & \textbf{45.2} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\todo{Add ablation study results once the third experiment run finishes.}

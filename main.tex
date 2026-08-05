@@ -1,0 +1,88 @@
+\documentclass[11pt,a4paper]{article}
+
+% ==============================================================================
+% Page Geometry & Typography
+% ==============================================================================
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype} % High-quality typography adjustments
+
+% ==============================================================================
+% Graphics, Tables, & Utility Packages
+% ==============================================================================
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{subcaption}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+% ==============================================================================
+% Citations & Bibliography
+% ==============================================================================
+\usepackage[square,numbers,sort&compress]{natbib}
+
+% ==============================================================================
+% Custom Macros & Project Commands
+% ==============================================================================
+\input{macros/comments.tex}
+\input{macros/commands.tex}
+
+% ==============================================================================
+% Hyperlinks & Clever References (cleveref must be loaded AFTER hyperref)
+% ==============================================================================
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=green!50!black,
+    urlcolor=blue!80!black,
+    pdftitle={SISTER: A Novel Framework for Research and Optimization},
+    pdfauthor={Research Team}
+}
+\usepackage{cleveref}
+
+% ==============================================================================
+% Document Title & Metadata
+% ==============================================================================
+\title{\textbf{\sister{}: A Novel Framework for Research and Optimization}}
+
+\author{
+    \textbf{Author A}$^1$ \quad \textbf{Author B}$^1$ \quad \textbf{Author C}$^2$ \\
+    $^1$Department of Computer Science, Institution A \\
+    $^2$Department of Electrical Engineering, Institution B \\
+    \texttt{\{authora, authorb\}@institution-a.edu, authorc@institution-b.edu}
+}
+
+\date{\today}
+
+% ==============================================================================
+% Main Document Content
+% ==============================================================================
+\begin{document}
+
+\maketitle
+
+\input{sections/00_abstract.tex}
+\input{sections/01_introduction.tex}
+\input{sections/02_related_work.tex}
+\input{sections/03_methodology.tex}
+\input{sections/04_experiments.tex}
+\input{sections/05_discussion.tex}
+\input{sections/06_conclusion.tex}
+
+% ==============================================================================
+% Bibliography
+% ==============================================================================
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+% ==============================================================================
+% Appendix
+% ==============================================================================
+\clearpage
+\input{sections/99_appendix.tex}
+
+\end{document}

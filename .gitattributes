@@ -1,0 +1,15 @@
+# Set default behavior for all files
+* text=auto eol=lf
+
+# LaTeX source files
+*.tex text eol=lf
+*.bib text eol=lf
+*.sty text eol=lf
+*.cls text eol=lf
+*.md  text eol=lf
+
+# Binary files
+*.pdf binary
+*.png binary
+*.jpg binary
+*.eps binary
