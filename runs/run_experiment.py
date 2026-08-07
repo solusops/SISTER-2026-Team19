@@ -1,58 +1,32 @@
+"""Run the creative-writing benchmark against an LM Studio model sequence.
+
+Each generated response is written immediately to two raw datasets:
+
+* ``results/<run-id>/outputs.json`` is the self-contained dataset for one
+  model/configuration run.
+* ``results/all.json`` is the independently usable dataset across all runs.
+
+``results/index.json`` records the evidence needed to reproduce and audit a
+run: model and inference settings, protocol hashes, progress, record IDs, and
+file hashes.  Run ``--sequence`` to use the tracked ``models.json`` plan.
 """
-Runs the creative-writing "lost in conversation" benchmark against models
-served by an OpenAI-compatible LM Studio endpoint.
 
-For each benchmark item and each model, generates TWO outputs:
-  - "full":    single prompt containing the complete fully-specified instruction
-  - "sharded": a multi-turn conversation where each shard is sent as a
-               separate user turn (mirrors the "LLMs Get Lost in Multi-Turn
-               Conversation" methodology), and the FINAL assistant turn
-               (after the last shard) is treated as the story to evaluate.
-
-Usage:
-    python3 run_experiment.py --list-models
-    python3 run_experiment.py --models <model-id-1> <model-id-2> --limit 3
-    python3 run_experiment.py --models <model-id> --resume
-
-Recommended model sequence:
-    openai/gpt-oss-20b
-    qwen/qwen3.5-9b
-    google/gemma-4-26b-a4b-qat
-    mistral-7b-instruct-v0.2
-    prism-ml/bonsai-27b
-    liquid/lfm2-24b-a2b
-    thedrummer_cydonia-24b-v4.2.0
-
-LM Studio must be running its local server (the default endpoint is
-`http://localhost:1234/v1`). The runner explicitly loads one model through
-LM Studio's native `/api/v1/models/load` endpoint, evaluates it, and unloads
-that instance before moving to the next model. Use the exact model IDs
-returned by `--list-models`; the names shown in the LM Studio model picker are
-not always the IDs accepted by the API.
-
-Example:
-    python3 run_experiment.py \
-        --models "<model-id-1-from-list-models>" \
-                 "<model-id-2-from-list-models>" --resume
-"""
 import argparse
 import hashlib
 import json
 import os
-import re
 import tempfile
 import time
 import traceback
 import uuid
-import math
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
 
 
 DATA_PATH = "benchmark_data.json"
-OUT_PATH = "results.jsonl"
-INDEX_PATH = "run_index.json"
+PLAN_PATH = "models.json"
+OUT_PATH = "results"
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT = 600
@@ -61,35 +35,21 @@ DEFAULT_CONTEXT_LENGTH_OVERRIDES = {
     "google/gemma-4-26b-a4b-qat": 32768,
     "mistral-7b-instruct-v0.2": 32768,
 }
-DEFAULT_MODEL_SEQUENCE = (
-    "openai/gpt-oss-20b",
-    "qwen/qwen3.5-9b",
-    "google/gemma-4-26b-a4b-qat",
-    "mistral-7b-instruct-v0.2",
-    "prism-ml/bonsai-27b",
-    "liquid/lfm2-24b-a2b",
-    "thedrummer_cydonia-24b-v4.2.0",
-)
-
 SYSTEM_PROMPT = (
     "You are a skilled creative writer. Follow the user's instructions "
     "for the story precisely, including any exact phrases, constraints, "
     "or stylistic requirements."
 )
-
-FULL_RESULT_FIELDS = (
-    "domain", "item_id", "title", "model", "condition", "story", "seconds"
-)
-SHARDED_RESULT_FIELDS = (
-    "domain", "item_id", "title", "model", "condition", "story", "transcript", "seconds"
-)
+CONDITIONS = ("full", "sharded")
+REASONING_EFFORTS = {"off", "on", "low", "medium", "high"}
 
 
-def load_items(limit=None):
-    dataset_path = Path(__file__).resolve().parent / DATA_PATH
-    with dataset_path.open("r", encoding="utf-8") as f:
-        items = json.load(f)
-    return items[:limit] if limit else items
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def canonical_json(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def sha256_file(path):
@@ -100,8 +60,60 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def sha256_value(value):
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def atomic_write_json(path, document):
+    """Atomically replace one small JSON document."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=".experiment-", suffix=".json", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(document, output, ensure_ascii=False, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def read_output_document(path):
+    """Read one compact raw-output document without accepting partial schemas."""
+    path = Path(path)
+    if not path.exists():
+        return {"schema_version": 1, "outputs": []}
+    with path.open("r", encoding="utf-8") as source:
+        try:
+            document = json.load(source)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid raw output JSON in {path}") from exc
+    if document.get("schema_version") != 1 or not isinstance(document.get("outputs"), list):
+        raise RuntimeError(f"Invalid raw output schema in {path}")
+    for record in document["outputs"]:
+        if not isinstance(record, dict) or not record.get("record_id"):
+            raise RuntimeError(f"Invalid raw record in {path}")
+    return document
+
+
+def load_items(limit=None):
+    dataset_path = Path(__file__).resolve().parent / DATA_PATH
+    with dataset_path.open("r", encoding="utf-8") as source:
+        items = json.load(source)
+    if limit is not None and limit < 1:
+        raise ValueError("--limit must be positive")
+    return items[:limit] if limit is not None else items
+
+
 def summarize_model_record(record):
-    """Keep stable LM Studio identity fields without storing lifecycle state."""
     if not record:
         return None
     quantization = record.get("quantization") or {}
@@ -113,211 +125,12 @@ def summarize_model_record(record):
         "parameters": record.get("params_string"),
         "quantization": quantization.get("name"),
         "quantization_bits": quantization.get("bits_per_weight"),
-        "size_bytes": record.get("size_bytes"),
         "max_context_length": record.get("max_context_length"),
-        "format": record.get("format"),
         "selected_variant": record.get("selected_variant"),
-        "variants": record.get("variants"),
-        "capabilities": record.get("capabilities"),
     }
-
-
-def load_done_keys(output_path):
-    """Return result keys already written to ``output_path`` for --resume."""
-    done = set()
-    if os.path.exists(output_path):
-        with open(output_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    row = json.loads(line)
-                    done.add((row["domain"], row["item_id"], row["model"], row["condition"]))
-                except Exception:
-                    continue
-    return done
-
-
-def model_output_path(base_output, model):
-    """Append a filesystem-safe model name to the configured output path."""
-    path = Path(base_output)
-    suffix = path.suffix or ".jsonl"
-    stem = path.stem if path.suffix else path.name
-    safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", model).strip("._")
-    return str(path.with_name(f"{stem}_{safe_model}{suffix}"))
-
-
-def append_telemetry(telemetry_path, record):
-    """Append verbose progress and per-turn diagnostics to telemetry."""
-    append_jsonl(telemetry_path, record)
-
-
-def append_jsonl(path, record):
-    with open(path, "a", encoding="utf-8") as output:
-        output.write(json.dumps(record, ensure_ascii=False) + "\n")
-        output.flush()
-
-
-class IndexWriter:
-    """Persist compact hierarchical batch/run summaries as one JSON document."""
-
-    def __init__(self, path):
-        self.path = path
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as source:
-                    self.document = json.load(source)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(
-                    f"Index {path} is not structured JSON; use a new --index path"
-                ) from exc
-            if not isinstance(self.document, dict) or not isinstance(
-                self.document.get("batches"), list
-            ):
-                raise RuntimeError(f"Index {path} has an invalid structured format")
-        else:
-            self.document = {"schema_version": 1, "batches": []}
-
-    def _write(self):
-        directory = os.path.dirname(os.path.abspath(self.path)) or "."
-        fd, temporary_path = tempfile.mkstemp(
-            prefix=".run-index-", suffix=".json", dir=directory
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as output:
-                json.dump(self.document, output, ensure_ascii=False, indent=2)
-                output.write("\n")
-            os.replace(temporary_path, self.path)
-        except Exception:
-            try:
-                os.unlink(temporary_path)
-            except FileNotFoundError:
-                pass
-            raise
-
-    def start_batch(self, batch):
-        batch_id = uuid.uuid4().hex
-        self.document["batches"].append({"batch_id": batch_id, **batch, "runs": []})
-        self._write()
-        return batch_id
-
-    def start_run(self, batch_id, run):
-        batch = next(batch for batch in self.document["batches"] if batch["batch_id"] == batch_id)
-        batch["runs"].append(run)
-        self._write()
-
-    def finish_run(self, batch_id, run_id, result):
-        batch = next(batch for batch in self.document["batches"] if batch["batch_id"] == batch_id)
-        run = next(run for run in batch["runs"] if run["run_id"] == run_id)
-        run.update(result)
-        self._write()
-
-
-def seed_model_output_from_legacy(model_output, legacy_output, model):
-    """Copy this model's old combined rows into its new per-model file once."""
-    if os.path.exists(model_output) or not legacy_output or not os.path.exists(legacy_output):
-        return 0
-
-    rows = []
-    with open(legacy_output, "r", encoding="utf-8") as source:
-        for line in source:
-            try:
-                row = json.loads(line)
-            except Exception:
-                continue
-            if row.get("model") == model:
-                rows.append(line)
-
-    if not rows:
-        return 0
-    with open(model_output, "w", encoding="utf-8") as destination:
-        destination.writelines(rows)
-    return len(rows)
-
-
-def clean_result_file(path, allowed_models):
-    """Normalize one JSONL artifact and remove disallowed/duplicate rows."""
-    if not path or not os.path.exists(path):
-        return {"path": path, "kept": 0, "removed": 0, "duplicates": 0}
-
-    kept_rows = []
-    seen = set()
-    removed = 0
-    duplicates = 0
-    with open(path, "r", encoding="utf-8") as source:
-        for line in source:
-            try:
-                row = json.loads(line)
-                key = (row["domain"], row["item_id"], row["model"], row["condition"])
-            except Exception:
-                removed += 1
-                continue
-            if row["model"] not in allowed_models:
-                removed += 1
-                continue
-            if key in seen:
-                duplicates += 1
-                removed += 1
-                continue
-            fields = SHARDED_RESULT_FIELDS if row["condition"] == "sharded" else FULL_RESULT_FIELDS
-            if row["condition"] not in {"full", "sharded"}:
-                removed += 1
-                continue
-            kept_rows.append({field: row[field] for field in fields if field in row})
-            seen.add(key)
-
-    directory = os.path.dirname(os.path.abspath(path)) or "."
-    fd, temporary_path = tempfile.mkstemp(prefix=".results-clean-", suffix=".jsonl", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as destination:
-            for row in kept_rows:
-                destination.write(json.dumps(row, ensure_ascii=False) + "\n")
-        os.replace(temporary_path, path)
-    except Exception:
-        try:
-            os.unlink(temporary_path)
-        except FileNotFoundError:
-            pass
-        raise
-    return {"path": path, "kept": len(kept_rows), "removed": removed, "duplicates": duplicates}
-
-
-def count_completed(items, done, model):
-    """Count completed full/sharded rows for this model and item selection."""
-    return sum(
-        (items_item["domain"], items_item["item_id"], model, condition) in done
-        for items_item in items
-        for condition in ("full", "sharded")
-    )
-
-
-def progress_metrics(total_rows, completed_rows, initial_completed, started_monotonic):
-    elapsed_seconds = time.monotonic() - started_monotonic
-    observed_rows = completed_rows - initial_completed
-    remaining_rows = max(total_rows - completed_rows, 0)
-    average_seconds = elapsed_seconds / observed_rows if observed_rows else None
-    if remaining_rows == 0:
-        eta_seconds = 0
-    else:
-        eta_seconds = remaining_rows * average_seconds if average_seconds is not None else None
-    return {
-        "completed_rows": completed_rows,
-        "total_rows": total_rows,
-        "remaining_rows": remaining_rows,
-        "elapsed_seconds": round(elapsed_seconds, 1),
-        "eta_seconds": None if eta_seconds is None else round(eta_seconds, 1),
-    }
-
-
-def format_eta(seconds):
-    if seconds is None:
-        return "unknown"
-    seconds = max(int(round(seconds)), 0)
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def parse_context_lengths(specs):
-    """Parse repeated MODEL=TOKEN_COUNT overrides for per-model loading."""
     overrides = {}
     for spec in specs or []:
         try:
@@ -336,8 +149,6 @@ def parse_context_lengths(specs):
 
 
 def parse_reasoning_efforts(specs):
-    """Parse repeated MODEL=EFFORT overrides for LM Studio reasoning."""
-    allowed = {"off", "on", "low", "medium", "high"}
     overrides = {}
     for spec in specs or []:
         try:
@@ -346,39 +157,270 @@ def parse_reasoning_efforts(specs):
             raise ValueError(
                 f"Invalid --reasoning-effort-for value {spec!r}; expected MODEL=EFFORT"
             ) from exc
-        if not model or effort not in allowed:
+        if not model or effort not in REASONING_EFFORTS:
             raise ValueError(
-                f"Invalid reasoning effort {spec!r}; use one of {sorted(allowed)}"
+                f"Invalid reasoning effort {spec!r}; use one of {sorted(REASONING_EFFORTS)}"
             )
         overrides[model] = effort
     return overrides
 
 
-class ResultWriter:
-    """Write each row to its model-specific JSONL file."""
+def load_model_plan(path):
+    """Read the tracked sequence; every entry owns its context configuration."""
+    try:
+        with Path(path).open("r", encoding="utf-8") as source:
+            document = json.load(source)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Model plan not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Model plan is not valid JSON: {path}") from exc
+    if document.get("schema_version") != 1 or not isinstance(document.get("models"), list):
+        raise RuntimeError(f"Model plan {path} must contain schema_version 1 and a models list")
+    plan = []
+    seen = set()
+    for entry in document["models"]:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"Model plan {path} contains a non-object entry")
+        model = entry.get("id")
+        context_length = entry.get("context_length")
+        reasoning_effort = entry.get("reasoning_effort")
+        if not isinstance(model, str) or not model:
+            raise RuntimeError(f"Model plan {path} contains an entry without a model id")
+        if model in seen:
+            raise RuntimeError(f"Model plan {path} contains {model!r} more than once")
+        if not isinstance(context_length, int) or context_length <= 0:
+            raise RuntimeError(f"Model plan entry {model!r} needs a positive context_length")
+        if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
+            raise RuntimeError(
+                f"Model plan entry {model!r} has an invalid reasoning_effort"
+            )
+        seen.add(model)
+        plan.append(
+            {
+                "id": model,
+                "context_length": context_length,
+                "reasoning_effort": reasoning_effort,
+            }
+        )
+    if not plan:
+        raise RuntimeError(f"Model plan {path} contains no models")
+    return plan
 
-    def __init__(self, base_output):
-        self.base_output = base_output
-        self.files = {}
 
-    def __enter__(self):
-        return self
+def resolve_model_plan(args, context_overrides, effort_overrides):
+    if args.sequence and args.models:
+        raise ValueError("--sequence cannot be combined with --models")
+    if args.sequence:
+        plan_path = Path(args.plan)
+        if not plan_path.is_absolute():
+            plan_path = Path(__file__).resolve().parent / plan_path
+        plan = load_model_plan(plan_path)
+        plan_provenance = {"path": str(plan_path), "sha256": sha256_file(plan_path)}
+    elif args.models:
+        plan = [
+            {
+                "id": model,
+                "context_length": DEFAULT_CONTEXT_LENGTH_OVERRIDES.get(
+                    model, DEFAULT_CONTEXT_LENGTH
+                ),
+                "reasoning_effort": None,
+            }
+            for model in args.models
+        ]
+        plan_provenance = None
+    else:
+        raise ValueError("--models or --sequence is required unless --list-models is used by itself")
+    resolved = []
+    for entry in plan:
+        model = entry["id"]
+        context_length = context_overrides.get(
+            model, args.context_length if args.context_length is not None else entry["context_length"]
+        )
+        if context_length <= 0:
+            raise ValueError("--context-length must be positive")
+        resolved.append(
+            {
+                "id": model,
+                "context_length": context_length,
+                "reasoning_effort": effort_overrides.get(
+                    model,
+                    args.reasoning_effort
+                    if args.reasoning_effort is not None
+                    else entry["reasoning_effort"],
+                ),
+            }
+        )
+    return resolved, plan_provenance
 
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        for output in self.files.values():
-            output.close()
 
-    def write(self, line):
-        row = json.loads(line)
-        model = row["model"]
-        if model not in self.files:
-            output_path = model_output_path(self.base_output, model)
-            self.files[model] = open(output_path, "a", encoding="utf-8")
-        self.files[model].write(line)
+class RunIndex:
+    """Atomic index of every run and its proof/progress metadata."""
 
-    def flush(self):
-        for output in self.files.values():
-            output.flush()
+    def __init__(self, path):
+        self.path = Path(path)
+        if self.path.exists():
+            with self.path.open("r", encoding="utf-8") as source:
+                self.document = json.load(source)
+            if (
+                self.document.get("schema_version") != 1
+                or not isinstance(self.document.get("runs"), list)
+            ):
+                raise RuntimeError(f"Index {self.path} does not use schema version 1")
+        else:
+            self.document = {"schema_version": 1, "runs": []}
+
+    def write(self):
+        atomic_write_json(self.path, self.document)
+
+    def find(self, fingerprint):
+        return [
+            run
+            for run in self.document["runs"]
+            if run.get("config_fingerprint") == fingerprint
+        ]
+
+    def add(self, run):
+        self.document["runs"].append(run)
+        self.write()
+
+    def update(self, run_id, **changes):
+        run = next(run for run in self.document["runs"] if run["run_id"] == run_id)
+        run.update(changes)
+        self.write()
+        return run
+
+
+class RunStore:
+    """One model run's raw data plus the immediately mirrored aggregate data."""
+
+    def __init__(self, output_root, run_id):
+        self.root = Path(output_root)
+        self.run_id = run_id
+        self.run_dir = self.root / run_id
+        self.manifest_path = self.run_dir / "manifest.json"
+        self.output_path = self.run_dir / "outputs.json"
+        self.all_path = self.root / "all.json"
+        self.records = []
+        self.output_document = None
+        self.all_document = None
+
+    @staticmethod
+    def _aggregate_run(manifest):
+        return {
+            "run_id": manifest["run_id"],
+            "config_fingerprint": manifest["config_fingerprint"],
+            "dataset": manifest["dataset"],
+            "protocol": {"sha256": manifest["protocol"]["sha256"]},
+            "generation": manifest["generation"],
+            "model": manifest["model"],
+            "outputs": [],
+        }
+
+    def _load_all_document(self):
+        if self.all_path.exists():
+            with self.all_path.open("r", encoding="utf-8") as source:
+                document = json.load(source)
+            if document.get("schema_version") != 1 or not isinstance(document.get("runs"), list):
+                raise RuntimeError(f"Invalid aggregate output schema in {self.all_path}")
+            return document
+        return {"schema_version": 1, "runs": []}
+
+    def _aggregate_group(self):
+        group = next(
+            (group for group in self.all_document["runs"] if group.get("run_id") == self.run_id),
+            None,
+        )
+        if group is None or not isinstance(group.get("outputs"), list):
+            raise RuntimeError(f"Aggregate output lacks run {self.run_id}")
+        return group
+
+    def create(self, manifest):
+        if self.run_dir.exists():
+            raise RuntimeError(f"Run directory already exists: {self.run_dir}")
+        self.run_dir.mkdir(parents=True)
+        atomic_write_json(self.manifest_path, manifest)
+        self.output_document = {"schema_version": 1, "outputs": []}
+        atomic_write_json(self.output_path, self.output_document)
+        self.all_document = self._load_all_document()
+        self.all_document["runs"].append(self._aggregate_run(manifest))
+        atomic_write_json(self.all_path, self.all_document)
+        self.records = []
+
+    def load(self):
+        if not self.manifest_path.exists():
+            raise RuntimeError(f"Run manifest is missing: {self.manifest_path}")
+        self.output_document = read_output_document(self.output_path)
+        self.all_document = self._load_all_document()
+        self._aggregate_group()
+        self.records = self.output_document["outputs"]
+        return self.records
+
+    def reconcile(self):
+        """Repair an interrupted dual append without regenerating model output."""
+        self.load()
+        local = {record["record_id"]: record for record in self.records}
+        if len(local) != len(self.records):
+            raise RuntimeError(f"Duplicate record IDs in {self.output_path}")
+        global_records = self._aggregate_group()["outputs"]
+        aggregate = {record["record_id"]: record for record in global_records}
+        if len(aggregate) != len(global_records):
+            raise RuntimeError(f"Duplicate record IDs for run {self.run_id} in {self.all_path}")
+        for record_id in local.keys() & aggregate.keys():
+            if canonical_json(local[record_id]) != canonical_json(aggregate[record_id]):
+                raise RuntimeError(
+                    f"Record {record_id} differs between {self.output_path} and {self.all_path}"
+                )
+        for record in self.records:
+            if record["record_id"] not in aggregate:
+                global_records.append(record)
+        for record in global_records:
+            if record["record_id"] not in local:
+                self.records.append(record)
+        self.records.sort(key=lambda record: record["sequence"])
+        global_records.sort(key=lambda record: record["sequence"])
+        self.output_document["outputs"] = self.records
+        atomic_write_json(self.output_path, self.output_document)
+        atomic_write_json(self.all_path, self.all_document)
+        return self.records
+
+    def append(self, record):
+        if record["record_id"] in {existing["record_id"] for existing in self.records}:
+            raise RuntimeError(f"Duplicate record id {record['record_id']}")
+        self.records.append(record)
+        self.output_document["outputs"] = self.records
+        atomic_write_json(self.output_path, self.output_document)
+        self._aggregate_group()["outputs"].append(record)
+        atomic_write_json(self.all_path, self.all_document)
+
+    def update_manifest(self, **changes):
+        with self.manifest_path.open("r", encoding="utf-8") as source:
+            manifest = json.load(source)
+        manifest.update(changes)
+        atomic_write_json(self.manifest_path, manifest)
+        return manifest
+
+    def done_keys(self):
+        return {
+            (record["item"]["domain"], record["item"]["item_id"], record["condition"])
+            for record in self.records
+            if record.get("is_final")
+        }
+
+    def proof(self):
+        record_ids = [record["record_id"] for record in self.records]
+        return {
+            "run_output_path": str(self.output_path),
+            "all_output_path": str(self.all_path),
+            "record_count": len(record_ids),
+            "record_ids_sha256": sha256_value(record_ids),
+            "run_output_sha256": sha256_file(self.output_path)
+            if self.output_path.exists()
+            else None,
+            "all_run_records_sha256": sha256_value(self._aggregate_group()["outputs"]),
+            "all_output_sha256_at_update": sha256_file(self.all_path)
+            if self.all_path.exists()
+            else None,
+        }
 
 
 class LMStudioClient:
@@ -395,9 +437,7 @@ class LMStudioClient:
 
     @staticmethod
     def _derive_management_url(base_url):
-        if base_url.endswith("/v1"):
-            return f"{base_url[:-3]}/api/v1"
-        return f"{base_url}/api/v1"
+        return f"{base_url[:-3]}/api/v1" if base_url.endswith("/v1") else f"{base_url}/api/v1"
 
     def _request_json(self, method, path, payload=None, base_url=None):
         body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -406,630 +446,416 @@ class LMStudioClient:
             headers["Content-Type"] = "application/json"
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-
-        req = request.Request(
-            f"{(base_url or self.base_url)}{path}",
-            data=body,
-            headers=headers,
-            method=method,
+        request_object = request.Request(
+            f"{base_url or self.base_url}{path}", data=body, headers=headers, method=method
         )
         try:
-            with request.urlopen(req, timeout=self.timeout) as response:
+            with request.urlopen(request_object, timeout=self.timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             details = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"LM Studio returned HTTP {exc.code} for {(base_url or self.base_url)}{path}: {details}"
+                f"LM Studio returned HTTP {exc.code} for {base_url or self.base_url}{path}: {details}"
             ) from exc
         except (TimeoutError, error.URLError) as exc:
             reason = getattr(exc, "reason", str(exc))
-            raise RuntimeError(
-                f"Could not reach LM Studio at {base_url or self.base_url}: {reason}"
-            ) from exc
+            raise RuntimeError(f"Could not reach LM Studio at {base_url or self.base_url}: {reason}") from exc
 
     def list_models(self):
-        response = self._request_json("GET", "/models")
-        return [model["id"] for model in response.get("data", [])]
+        response = self._request_json("GET", "/models", base_url=self.management_url)
+        return [record["key"] for record in response.get("models", [])]
 
     def get_model_record(self, model):
-        """Return native LM Studio metadata for one model key, if available."""
         response = self._request_json("GET", "/models", base_url=self.management_url)
-        return next(
-            (record for record in response.get("models", []) if record.get("key") == model),
-            None,
-        )
+        return next((record for record in response.get("models", []) if record.get("key") == model), None)
 
     def list_loaded_instances(self):
-        """Return native-API model instances currently loaded in LM Studio."""
-        response = self._request_json(
-            "GET", "/models", base_url=self.management_url
-        )
-        instances = []
-        for model in response.get("models", []):
-            for instance in model.get("loaded_instances", []):
-                instances.append(
-                    {"model": model.get("key"), "instance_id": instance.get("id")}
-                )
-        return instances
+        response = self._request_json("GET", "/models", base_url=self.management_url)
+        return [
+            {"model": model.get("key"), "instance_id": instance.get("id")}
+            for model in response.get("models", [])
+            for instance in model.get("loaded_instances", [])
+        ]
 
-    def load_model(self, model, context_length=None):
-        payload = {"model": model}
-        if context_length is not None:
-            payload["context_length"] = context_length
+    def load_model(self, model, context_length):
         response = self._request_json(
-            "POST", "/models/load", payload, base_url=self.management_url
+            "POST",
+            "/models/load",
+            {"model": model, "context_length": context_length},
+            base_url=self.management_url,
         )
         try:
             return response["instance_id"]
         except (KeyError, TypeError) as exc:
-            raise RuntimeError(
-                f"LM Studio load response did not contain an instance ID: {response}"
-            ) from exc
+            raise RuntimeError(f"LM Studio load response did not contain an instance ID: {response}") from exc
 
     def unload_model(self, instance_id):
         self._request_json(
-            "POST",
-            "/models/unload",
-            {"instance_id": instance_id},
-            base_url=self.management_url,
+            "POST", "/models/unload", {"instance_id": instance_id}, base_url=self.management_url
         )
-        # Do not start another model until LM Studio confirms this instance is
-        # gone. A successful unload response alone is not enough to protect
-        # against overlapping engine cleanup on a heavily loaded machine.
         deadline = time.monotonic() + min(self.timeout, 60)
         while time.monotonic() < deadline:
-            if not any(
-                instance["instance_id"] == instance_id
-                for instance in self.list_loaded_instances()
-            ):
+            if not any(instance["instance_id"] == instance_id for instance in self.list_loaded_instances()):
                 return
             time.sleep(1)
-        raise RuntimeError(
-            f"LM Studio still reports instance {instance_id} as loaded after unload"
-        )
+        raise RuntimeError(f"LM Studio still reports instance {instance_id} as loaded after unload")
 
-    def chat(self, model, messages, options, context_length=None):
-        prompt_characters = sum(
-            len(message.get("content") or "") for message in messages
-        )
-        metadata = {
-            "model": model,
-            "context_length": context_length,
-            "prompt_characters": prompt_characters,
-            "estimated_prompt_tokens": math.ceil(prompt_characters / 4),
-            "usage": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "reasoning_tokens": None,
-            "total_tokens": None,
-            "finish_reason": None,
-            "response_characters": None,
-            "reasoning_characters": None,
-            "context_limit_reached": False,
-            "context_limit_signal": None,
-        }
+    def chat(self, model, messages, options):
+        metadata = {"usage": None, "finish_reason": None}
         self.last_turn_metadata = metadata
         try:
             response = self._request_json(
-                "POST",
-                "/chat/completions",
-                {"model": model, "messages": messages, **options},
+                "POST", "/chat/completions", {"model": model, "messages": messages, **options}
             )
         except Exception as exc:
-            message = str(exc).lower()
-            if "context" in message or "token" in message or "length" in message:
-                metadata["context_limit_reached"] = True
-                metadata["context_limit_signal"] = "error"
             metadata["error"] = repr(exc)
             raise
         try:
             choice = response["choices"][0]
-            message = choice["message"]
-            content = message["content"]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(
-                f"LM Studio response did not contain assistant content: {response}"
-            ) from exc
+            raise RuntimeError(f"LM Studio response did not contain assistant content: {response}") from exc
         if not isinstance(content, str):
-            raise RuntimeError(
-                f"LM Studio returned non-text assistant content: {content!r}"
-            )
-        usage = response.get("usage") or {}
-        completion_details = usage.get("completion_tokens_details") or {}
-        reasoning_content = message.get("reasoning_content") or message.get("reasoning") or ""
-        if not isinstance(reasoning_content, str):
-            reasoning_content = json.dumps(reasoning_content, ensure_ascii=False)
-        metadata.update(
-            {
-                "usage": usage or None,
-                "prompt_tokens": usage.get("prompt_tokens"),
-                "completion_tokens": usage.get("completion_tokens"),
-                "reasoning_tokens": usage.get("reasoning_tokens")
-                or completion_details.get("reasoning_tokens"),
-                "total_tokens": usage.get("total_tokens"),
-                "finish_reason": choice.get("finish_reason"),
-                "response_characters": len(content),
-                "reasoning_characters": len(reasoning_content),
-            }
-        )
-        estimated_total_tokens = math.ceil(
-            (prompt_characters + len(content) + len(reasoning_content)) / 4
-        )
-        metadata["estimated_total_tokens"] = estimated_total_tokens
-        if context_length:
-            if metadata["total_tokens"] is not None:
-                if metadata["total_tokens"] >= context_length:
-                    metadata["context_limit_reached"] = True
-                    metadata["context_limit_signal"] = "usage"
-                elif metadata["total_tokens"] >= context_length * 0.9:
-                    metadata["context_limit_signal"] = "usage_near_limit"
-            elif estimated_total_tokens >= context_length:
-                metadata["context_limit_reached"] = True
-                metadata["context_limit_signal"] = "estimate"
-            elif estimated_total_tokens >= context_length * 0.9:
-                metadata["context_limit_signal"] = "estimate_near_limit"
-            if metadata["finish_reason"] == "length":
-                metadata["context_limit_reached"] = True
-                metadata["context_limit_signal"] = "finish_reason_length"
+            raise RuntimeError(f"LM Studio returned non-text assistant content: {content!r}")
+        metadata.update({"usage": response.get("usage"), "finish_reason": choice.get("finish_reason")})
         return content
 
 
-def run_full(client, model, item, options, context_length, turn_callback=None):
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": item["full_instruction"]},
-    ]
-    try:
-        reply = client.chat(model, messages, options, context_length)
-    except Exception:
-        if turn_callback is not None:
-            turn_callback(1, client.last_turn_metadata)
-        raise
-    if turn_callback is not None:
-        turn_callback(1, client.last_turn_metadata)
-    return reply
+def output_metrics(metadata, elapsed_seconds):
+    metrics = {"elapsed_seconds": round(elapsed_seconds, 3)}
+    if metadata.get("usage") is not None:
+        metrics["usage"] = metadata["usage"]
+    if metadata.get("finish_reason") is not None:
+        metrics["finish_reason"] = metadata["finish_reason"]
+    return metrics
 
 
-def run_sharded(client, model, item, options, context_length, turn_callback=None):
-    """Send each shard as its own user turn; the model's reply to each turn
-    is added to the conversation history. Only the FINAL reply (after the
-    last shard) is scored as the finished story, matching how a real user
-    would gradually refine a request in chat."""
+def make_raw_record(run, item, condition, turn, is_final, attempt_id, text, metrics, sequence):
+    return {
+        "schema_version": 1,
+        "record_id": uuid.uuid4().hex,
+        "sequence": sequence,
+        "created_at": now(),
+        "item": {key: item[key] for key in ("domain", "item_id", "title")},
+        "condition": condition,
+        "turn": turn,
+        "is_final": is_final,
+        "attempt_id": attempt_id,
+        "text": text,
+        "metrics": metrics,
+    }
+
+
+def progress(items, done, store):
+    completed = sum(
+        (item["domain"], item["item_id"], condition) in done
+        for item in items
+        for condition in CONDITIONS
+    )
+    return {
+        "completed_conditions": completed,
+        "total_conditions": len(items) * len(CONDITIONS),
+        "raw_records": len(store.records),
+    }
+
+
+def sync_proof(index, store, run_id, items, done, status):
+    state = {"status": status, "progress": progress(items, done, store), "proof": store.proof()}
+    store.update_manifest(**state)
+    index.update(run_id, **state)
+
+
+def write_turn(store, index, run, items, done, item, condition, turn, is_final, attempt_id, text, metadata):
+    record = make_raw_record(
+        run,
+        item,
+        condition,
+        turn,
+        is_final,
+        attempt_id,
+        text,
+        metadata,
+        len(store.records) + 1,
+    )
+    store.append(record)
+    if is_final:
+        done.add((item["domain"], item["item_id"], condition))
+    sync_proof(index, store, run["run_id"], items, done, "running")
+
+
+def run_full(client, store, index, run, items, done, item, options):
+    started = time.monotonic()
+    reply = client.chat(
+        run["model"]["id"],
+        [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": item["full_instruction"]}],
+        options,
+    )
+    write_turn(
+        store,
+        index,
+        run,
+        items,
+        done,
+        item,
+        "full",
+        1,
+        True,
+        uuid.uuid4().hex,
+        reply,
+        output_metrics(client.last_turn_metadata, time.monotonic() - started),
+    )
+
+
+def run_sharded(client, store, index, run, items, done, item, options):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    last_reply = None
-    turn_metadata = []
-    for turn_number, shard in enumerate(item["shards"], start=1):
+    attempt_id = uuid.uuid4().hex
+    for turn, shard in enumerate(item["shards"], start=1):
         messages.append({"role": "user", "content": shard})
-        try:
-            reply = client.chat(model, messages, options, context_length)
-        except Exception:
-            if turn_callback is not None:
-                turn_callback(turn_number, client.last_turn_metadata)
-            raise
-        metadata = {"turn_number": turn_number, **client.last_turn_metadata}
-        turn_metadata.append(metadata)
-        if turn_callback is not None:
-            turn_callback(turn_number, client.last_turn_metadata)
+        started = time.monotonic()
+        reply = client.chat(run["model"]["id"], messages, options)
+        write_turn(
+            store,
+            index,
+            run,
+            items,
+            done,
+            item,
+            "sharded",
+            turn,
+            turn == len(item["shards"]),
+            attempt_id,
+            reply,
+            output_metrics(client.last_turn_metadata, time.monotonic() - started),
+        )
         messages.append({"role": "assistant", "content": reply})
-        last_reply = reply
-    return last_reply, messages, turn_metadata
+
+
+def make_run(entry, identity, dataset_sha256, runner_sha256, args, plan_provenance=None):
+    generation = {"temperature": args.temperature, "seed": args.seed}
+    protocol = {
+        "system_prompt": SYSTEM_PROMPT,
+        "conditions": list(CONDITIONS),
+        "sha256": sha256_value({"system_prompt": SYSTEM_PROMPT, "conditions": CONDITIONS}),
+    }
+    configuration = {
+        "dataset_sha256": dataset_sha256,
+        "runner_sha256": runner_sha256,
+        "model": entry,
+        "generation": generation,
+        "protocol": protocol,
+        "model_plan": plan_provenance,
+    }
+    return {
+        "schema_version": 1,
+        "run_id": uuid.uuid4().hex,
+        "config_fingerprint": sha256_value(configuration),
+        "started_at": now(),
+        "status": "running",
+        "dataset": {"path": DATA_PATH, "sha256": dataset_sha256},
+        "runner": {"name": Path(__file__).name, "sha256": runner_sha256},
+        "provider": {
+            "name": "lm-studio",
+            "base_url": args.base_url,
+            "management_url": args.management_url,
+        },
+        "model_plan": plan_provenance,
+        "protocol": protocol,
+        "generation": generation,
+        "model": {"id": entry["id"], **{key: value for key, value in entry.items() if key != "id"}, "identity": identity},
+    }
+
+
+def expected_complete(items, done):
+    return len(done) == len(items) * len(CONDITIONS)
+
+
+def select_run(index, store_root, draft, items, resume):
+    """Reuse only the exact same configuration; different contexts make a new run."""
+    matches = index.find(draft["config_fingerprint"])
+    if resume and matches:
+        completed = [run for run in matches if run.get("status") == "completed"]
+        selected = completed[-1] if completed else matches[-1]
+        store = RunStore(store_root, selected["run_id"])
+        store.reconcile()
+        done = store.done_keys()
+        if selected.get("status") == "completed" and not expected_complete(items, done):
+            raise RuntimeError(
+                f"Run {selected['run_id']} is marked completed but its raw output is incomplete"
+            )
+        return selected, store, done, selected.get("status") == "completed"
+    store = RunStore(store_root, draft["run_id"])
+    manifest = {
+        **draft,
+        "progress": {
+            "completed_conditions": 0,
+            "total_conditions": len(items) * len(CONDITIONS),
+            "raw_records": 0,
+        },
+        "proof": None,
+    }
+    store.create(manifest)
+    manifest["proof"] = store.proof()
+    store.update_manifest(proof=manifest["proof"])
+    index.add({**manifest, "run_directory": str(store.run_dir)})
+    return draft, store, set(), False
+
+
+def execute_run(client, index, output_root, entry, items, dataset_sha256, runner_sha256, args, plan_provenance):
+    identity = None
+    metadata_error = None
+    if args.manage_models:
+        try:
+            identity = summarize_model_record(client.get_model_record(entry["id"]))
+        except Exception as exc:
+            metadata_error = repr(exc)
+    draft = make_run(entry, identity, dataset_sha256, runner_sha256, args, plan_provenance)
+    run, store, done, already_complete = select_run(index, output_root, draft, items, args.resume)
+    if already_complete:
+        sync_proof(index, store, run["run_id"], items, done, "completed")
+        index.update(run["run_id"], last_verified_at=now())
+        store.update_manifest(last_verified_at=now())
+        print(f"Already complete: {entry['id']} ({run['run_id']})")
+        return False
+
+    if run["run_id"] != draft["run_id"]:
+        print(f"Resuming {entry['id']} ({run['run_id']})")
+        index.update(run["run_id"], status="running", resumed_at=now())
+    else:
+        index.update(run["run_id"], model_metadata_error=metadata_error)
+    print(f"Run: {run['run_id']} | output: {store.run_dir}")
+    options = run["generation"].copy()
+    if entry["reasoning_effort"] is not None:
+        options["reasoning_effort"] = entry["reasoning_effort"]
+    status = "completed"
+    error_message = None
+    instance_id = None
+    model_failed = False
+    try:
+        if args.manage_models:
+            existing = client.list_loaded_instances()
+            if existing:
+                raise RuntimeError(f"Refusing to load another model while instances are loaded: {existing}")
+            print(f"Loading {entry['id']} at context {entry['context_length']}...")
+            instance_id = client.load_model(entry["id"], entry["context_length"])
+            loaded = client.list_loaded_instances()
+            if loaded != [{"model": entry["id"], "instance_id": instance_id}]:
+                raise RuntimeError(f"LM Studio did not report exactly the requested model: {loaded}")
+            index.update(run["run_id"], model_instance_id=instance_id)
+            store.update_manifest(model_instance_id=instance_id)
+        for item in items:
+            full_key = (item["domain"], item["item_id"], "full")
+            sharded_key = (item["domain"], item["item_id"], "sharded")
+            if full_key not in done:
+                try:
+                    run_full(client, store, index, run, items, done, item, options)
+                except Exception:
+                    model_failed = True
+                    status = "failed"
+                    error_message = traceback.format_exc()
+            if model_failed:
+                break
+            if sharded_key not in done:
+                try:
+                    run_sharded(client, store, index, run, items, done, item, options)
+                except Exception:
+                    model_failed = True
+                    status = "failed"
+                    error_message = traceback.format_exc()
+            if model_failed:
+                break
+    except KeyboardInterrupt:
+        status = "stopped_by_user"
+        error_message = "KeyboardInterrupt"
+        raise
+    except Exception:
+        status = "failed"
+        error_message = traceback.format_exc()
+        model_failed = True
+    finally:
+        if instance_id is not None:
+            try:
+                client.unload_model(instance_id)
+            except Exception:
+                status = "unload_failed"
+                error_message = traceback.format_exc()
+                model_failed = True
+        if status == "completed" and not expected_complete(items, done):
+            status = "failed"
+            error_message = "Run ended before all required final outputs were written"
+            model_failed = True
+        final = {"finished_at": now(), "error": error_message}
+        sync_proof(index, store, run["run_id"], items, done, status)
+        index.update(run["run_id"], **final)
+        store.update_manifest(**final)
+    if model_failed:
+        print(f"FAILED {entry['id']}: {error_message.splitlines()[-1] if error_message else status}")
+    else:
+        print(f"Completed {entry['id']}")
+    return model_failed
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--models", nargs="+", default=None,
-                    help="Exact LM Studio model IDs; pass several IDs to evaluate several models")
-    ap.add_argument("--sequence", action="store_true",
-                    help="Run the configured model sequence in the documented order")
-    ap.add_argument("--list-models", action="store_true",
-                    help="List model IDs exposed by LM Studio and exit unless --models is also supplied")
-    ap.add_argument("--base-url", default=os.environ.get("LM_STUDIO_BASE_URL", DEFAULT_BASE_URL),
-                    help=f"LM Studio API base URL (default: {DEFAULT_BASE_URL})")
-    ap.add_argument("--management-url", default=os.environ.get("LM_STUDIO_MANAGEMENT_URL"),
-                    help="Native LM Studio management API base URL; derived from --base-url by default")
-    ap.add_argument("--api-key", default=os.environ.get("LM_STUDIO_API_KEY", DEFAULT_API_KEY),
-                    help="Bearer token sent to the endpoint (default: LM_STUDIO_API_KEY or lm-studio)")
-    ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
-                    help=f"Request timeout in seconds (default: {DEFAULT_TIMEOUT})")
-    ap.add_argument("--limit", type=int, default=None, help="Only run the first N benchmark items (smoke test)")
-    ap.add_argument("--resume", action="store_true", help="Skip rows already in each model's output JSONL file")
-    ap.add_argument("--output", default=OUT_PATH,
-                    help=f"Base output path; model names are appended per file (default: {OUT_PATH})")
-    ap.add_argument("--index", default=INDEX_PATH,
-                    help=f"Run metadata JSONL index (default: {INDEX_PATH})")
-    ap.add_argument("--telemetry", default="run_telemetry.jsonl",
-                    help="Verbose progress/turn telemetry path (default: run_telemetry.jsonl)")
-    ap.add_argument("--legacy-output", default=None,
-                    help="Optional old combined JSONL file to seed model-specific outputs once")
-    ap.add_argument("--clean-results", action="store_true",
-                    help="Normalize result JSONL files, remove disallowed models, and deduplicate keys")
-    ap.add_argument("--clean-only", action="store_true",
-                    help="Perform --clean-results and exit without contacting LM Studio")
-    ap.add_argument("--temperature", type=float, default=0.8)
-    ap.add_argument("--context-length", type=int, default=None,
-                    help=(
-                        "Context length for models without a default override "
-                        f"(default: {DEFAULT_CONTEXT_LENGTH}; Gemma/Mistral: 32768)"
-                    ))
-    ap.add_argument("--context-length-for", action="append", default=[], metavar="MODEL=TOKENS",
-                    help="Override context length for one model; repeat for per-model settings")
-    ap.add_argument("--reasoning-effort", choices=("off", "on", "low", "medium", "high"),
-                    default=None, help="Default LM Studio reasoning effort for models that support it")
-    ap.add_argument("--reasoning-effort-for", action="append", default=[], metavar="MODEL=EFFORT",
-                    help="Override reasoning effort for one model; repeat for per-model settings")
-    ap.add_argument("--manage-models", action=argparse.BooleanOptionalAction, default=True,
-                    help="Load and unload each model through LM Studio's native API (default: enabled)")
-    args = ap.parse_args()
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--models", nargs="+", help="Exact LM Studio model IDs")
+    parser.add_argument("--sequence", action="store_true", help="Run the tracked models.json plan")
+    parser.add_argument("--plan", default=PLAN_PATH, help=f"Sequence plan path (default: {PLAN_PATH})")
+    parser.add_argument("--list-models", action="store_true", help="List installed LM Studio model IDs")
+    parser.add_argument("--base-url", default=os.environ.get("LM_STUDIO_BASE_URL", DEFAULT_BASE_URL))
+    parser.add_argument("--management-url", default=os.environ.get("LM_STUDIO_MANAGEMENT_URL"))
+    parser.add_argument("--api-key", default=os.environ.get("LM_STUDIO_API_KEY", DEFAULT_API_KEY))
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--limit", type=int, help="Only run the first N benchmark items")
+    parser.add_argument("--resume", action="store_true", help="Resume or skip only an exact matching run")
+    parser.add_argument("--output", default=OUT_PATH, help=f"Result directory (default: {OUT_PATH})")
+    parser.add_argument("--temperature", type=float, default=0.8)
+    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument("--context-length", type=int, help="Override every selected model's context length")
+    parser.add_argument("--context-length-for", action="append", default=[], metavar="MODEL=TOKENS")
+    parser.add_argument("--reasoning-effort", choices=sorted(REASONING_EFFORTS))
+    parser.add_argument("--reasoning-effort-for", action="append", default=[], metavar="MODEL=EFFORT")
+    parser.add_argument("--manage-models", action=argparse.BooleanOptionalAction, default=True)
+    args = parser.parse_args()
     try:
-        context_length_overrides = parse_context_lengths(args.context_length_for)
-        reasoning_effort_overrides = parse_reasoning_efforts(args.reasoning_effort_for)
-    except ValueError as exc:
-        ap.error(str(exc))
-
+        context_overrides = parse_context_lengths(args.context_length_for)
+        effort_overrides = parse_reasoning_efforts(args.reasoning_effort_for)
+        plan, plan_provenance = (
+            resolve_model_plan(args, context_overrides, effort_overrides)
+            if (args.models or args.sequence)
+            else (None, None)
+        )
+        items = load_items(args.limit) if plan else None
+    except (ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
     client = LMStudioClient(args.base_url, args.api_key, args.timeout, args.management_url)
-    if args.sequence and args.models:
-        ap.error("--sequence cannot be combined with --models")
-    if args.sequence:
-        args.models = list(DEFAULT_MODEL_SEQUENCE)
     if args.list_models:
         for model in client.list_models():
             print(model)
-        if args.models is None:
+        if plan is None:
             return
-    if not args.models:
-        ap.error("--models is required unless --list-models is used by itself")
-
-    if args.clean_only and not args.clean_results:
-        ap.error("--clean-only requires --clean-results")
-
-    if args.clean_results:
-        paths = [model_output_path(args.output, model) for model in args.models]
-        if args.legacy_output:
-            paths.append(args.legacy_output)
-        cleaned_paths = set()
-        for path in paths:
-            if path in cleaned_paths:
-                continue
-            summary = clean_result_file(path, set(args.models))
-            cleaned_paths.add(path)
-            if summary["path"] and os.path.exists(summary["path"]):
-                print(
-                    f"Cleaned {path}: kept {summary['kept']}, removed {summary['removed']} "
-                    f"({summary['duplicates']} duplicate keys)"
-                )
-        if args.clean_only:
-            return
-
-    items = load_items(args.limit)
+    if plan is None:
+        parser.error("--models or --sequence is required unless --list-models is used by itself")
     dataset_path = Path(__file__).resolve().parent / DATA_PATH
     dataset_sha256 = sha256_file(dataset_path)
     runner_sha256 = sha256_file(Path(__file__).resolve())
-    model_metadata = {}
-    model_metadata_errors = {}
-    if args.manage_models:
-        for model in args.models:
-            try:
-                record = client.get_model_record(model)
-                model_metadata[model] = summarize_model_record(record)
-                if record is None:
-                    model_metadata_errors[model] = "LM Studio did not return a matching model record"
-            except Exception as exc:
-                model_metadata[model] = None
-                model_metadata_errors[model] = repr(exc)
-    else:
-        for model in args.models:
-            model_metadata[model] = None
-            model_metadata_errors[model] = "unavailable because --no-manage-models was selected"
-    index_writer = IndexWriter(args.index)
-    batch_id = index_writer.start_batch(
-        {
-            "provider": "lm-studio",
-            "dataset": {
-                "path": DATA_PATH,
-                "sha256": dataset_sha256,
-                "items": len(items),
-            },
-            "runner": {
-                "name": Path(__file__).name,
-                "sha256": runner_sha256,
-            },
-            "protocol": {
-                "conditions": ["full", "sharded"],
-                "temperature": args.temperature,
-                "result_rows_per_model": len(items) * 2,
-            },
-            "output_base": args.output,
-        }
-    )
-    with ResultWriter(args.output) as out:
-        for model in args.models:
-            if model in context_length_overrides:
-                context_length = context_length_overrides[model]
-            elif args.context_length is not None:
-                context_length = args.context_length
-            else:
-                context_length = DEFAULT_CONTEXT_LENGTH_OVERRIDES.get(
-                    model, DEFAULT_CONTEXT_LENGTH
-                )
-            reasoning_effort = reasoning_effort_overrides.get(model, args.reasoning_effort)
-            options = {"temperature": args.temperature}
-            if reasoning_effort is not None:
-                options["reasoning_effort"] = reasoning_effort
-            output_path = model_output_path(args.output, model)
-            legacy_rows_reused = 0
-            if args.resume:
-                legacy_rows_reused = seed_model_output_from_legacy(
-                    output_path, args.legacy_output, model
-                )
-            done = load_done_keys(output_path) if args.resume else set()
-            print(f"Output: {output_path}")
-            total_rows = len(items) * 2
-            initial_completed = count_completed(items, done, model)
-            completed_rows = initial_completed
-            started_monotonic = time.monotonic()
-            run_id = uuid.uuid4().hex
-            started_at = datetime.now(timezone.utc).isoformat()
-            identity = model_metadata.get(model)
-            summary_base = {
-                "run_id": run_id,
-                "model": model,
-                "provider": "lm-studio",
-                "parameters": identity.get("parameters") if identity else None,
-                "quantization": identity.get("quantization") if identity else None,
-                "quantization_bits": identity.get("quantization_bits") if identity else None,
-                "architecture": identity.get("architecture") if identity else None,
-                "selected_variant": identity.get("selected_variant") if identity else None,
-                "max_context_length": identity.get("max_context_length") if identity else None,
-                "model_metadata_error": model_metadata_errors.get(model),
-                "dataset": DATA_PATH,
-                "dataset_sha256": dataset_sha256,
-                "runner": Path(__file__).name,
-                "runner_sha256": runner_sha256,
-                "items_requested": len(items),
-                "conditions": ["full", "sharded"],
-                "temperature": args.temperature,
-                "reasoning_effort": reasoning_effort,
-                "context_length": context_length,
-                "output_path": output_path,
-                "started_at": started_at,
-            }
-            telemetry_base = {
-                **summary_base,
-                "base_url": args.base_url,
-                "management_url": client.management_url if args.manage_models else None,
-                "model_metadata": identity,
-                "timeout": args.timeout,
-                "limit": args.limit,
-                "manage_models": args.manage_models,
-                "resume": args.resume,
-                "legacy_output": args.legacy_output,
-                "legacy_rows_reused": legacy_rows_reused,
-                "telemetry_path": args.telemetry,
-            }
-            index_writer.start_run(
-                batch_id,
-                {
-                    "run_id": run_id,
-                    "model": {
-                        "id": model,
-                        "parameters": identity.get("parameters") if identity else None,
-                        "quantization": identity.get("quantization") if identity else None,
-                        "quantization_bits": identity.get("quantization_bits") if identity else None,
-                        "architecture": identity.get("architecture") if identity else None,
-                        "selected_variant": identity.get("selected_variant") if identity else None,
-                        "max_context_length": identity.get("max_context_length") if identity else None,
-                    },
-                    "settings": {
-                        "reasoning_effort": reasoning_effort,
-                        "context_length": context_length,
-                    },
-                    "output_path": output_path,
-                    "started_at": started_at,
-                    "status": "running",
-                },
-            )
-            append_telemetry(args.telemetry, {**telemetry_base, "event": "started", "status": "started"})
-
-            def write_progress(status="running"):
-                metrics = progress_metrics(
-                    total_rows, completed_rows, initial_completed, started_monotonic
-                )
-                append_telemetry(
-                    args.telemetry,
-                    {**telemetry_base, **metrics, "event": "progress", "status": status},
-                )
-                print(
-                    f"Progress {model}: {metrics['completed_rows']}/{metrics['total_rows']} "
-                    f"complete | {metrics['remaining_rows']} remaining | "
-                    f"ETA {format_eta(metrics['eta_seconds'])}"
-                )
-
-            def record_turn(condition, item, turn_number, metadata):
-                if not metadata:
-                    return
-                turn_record = {
-                    **telemetry_base,
-                    "event": "turn",
-                    "status": "completed" if not metadata.get("error") else "failed",
-                    "condition": condition,
-                    "domain": item["domain"],
-                    "item_id": item["item_id"],
-                    "turn_number": turn_number,
-                    **metadata,
-                }
-                append_telemetry(args.telemetry, turn_record)
-                if metadata.get("context_limit_reached"):
-                    append_telemetry(
-                        args.telemetry,
-                        {**turn_record, "event": "context_limit", "status": "context_limit"},
-                    )
-                    print(
-                        f"  CONTEXT LIMIT SIGNAL: {model} | {item['domain']} "
-                        f"#{item['item_id']} | {condition} turn {turn_number} | "
-                        f"{metadata.get('context_limit_signal')}"
-                    )
-                elif metadata.get("context_limit_signal"):
-                    append_telemetry(
-                        args.telemetry,
-                        {**turn_record, "event": "context_warning", "status": "near_context_limit"},
-                    )
-
-            write_progress()
-            if initial_completed >= total_rows:
-                write_progress("already_complete")
-                index_writer.finish_run(
-                    batch_id,
-                    run_id,
-                    {
-                        **progress_metrics(
-                            total_rows, completed_rows, initial_completed, started_monotonic
-                        ),
-                        "status": "already_complete",
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                        "rows_written": 0,
-                        "error": None,
-                    },
-                )
-                print(f"Already complete: {model}; skipping model load")
-                continue
-            instance_id = None
-            rows_written = 0
-            status = "completed"
-            error_message = None
-            try:
-                if args.manage_models:
-                    existing = client.list_loaded_instances()
-                    if existing:
-                        raise RuntimeError(
-                            "Refusing to load another model while LM Studio has "
-                            f"loaded instances: {existing}"
-                        )
-                    print(f"Loading {model}...")
-                    instance_id = client.load_model(model, context_length)
-                    loaded = client.list_loaded_instances()
-                    if loaded != [{"model": model, "instance_id": instance_id}]:
-                        raise RuntimeError(
-                            "LM Studio did not report exactly the requested model "
-                            f"as loaded: {loaded}"
-                        )
-                    print(f"Loaded {model} as instance {instance_id}")
-
-                model_failed = False
-                for item in items:
-                    key_full = (item["domain"], item["item_id"], model, "full")
-                    key_shard = (item["domain"], item["item_id"], model, "sharded")
-
-                    if key_full not in done:
-                        print(f"{model} | {item['domain']} #{item['item_id']} | full")
-                        try:
-                            t0 = time.time()
-                            story = run_full(
-                                client,
-                                model,
-                                item,
-                                options,
-                                context_length,
-                                lambda turn_number, metadata: record_turn(
-                                    "full", item, turn_number, metadata
-                                ),
-                            )
-                            row = {
-                                "domain": item["domain"], "item_id": item["item_id"], "title": item["title"],
-                                "model": model, "condition": "full", "story": story,
-                                "seconds": round(time.time() - t0, 1),
-                            }
-                            out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                            out.flush()
-                            rows_written += 1
-                            completed_rows += 1
-                            write_progress()
-                        except Exception:
-                            print(f"  FAILED: {traceback.format_exc()}")
-                            model_failed = True
-                            status = "failed"
-                            error_message = traceback.format_exc()
-
-                    if model_failed:
-                        print(f"  SKIPPING remaining items for {model} after the first failure")
-                        break
-
-                    if key_shard not in done:
-                        print(f"{model} | {item['domain']} #{item['item_id']} | sharded")
-                        try:
-                            t0 = time.time()
-                            story, transcript, _ = run_sharded(
-                                client,
-                                model,
-                                item,
-                                options,
-                                context_length,
-                                lambda turn_number, metadata: record_turn(
-                                    "sharded", item, turn_number, metadata
-                                ),
-                            )
-                            row = {
-                                "domain": item["domain"], "item_id": item["item_id"], "title": item["title"],
-                                "model": model, "condition": "sharded", "story": story,
-                                "transcript": transcript, "seconds": round(time.time() - t0, 1),
-                            }
-                            out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                            out.flush()
-                            rows_written += 1
-                            completed_rows += 1
-                            write_progress()
-                        except Exception:
-                            print(f"  FAILED: {traceback.format_exc()}")
-                            model_failed = True
-                            status = "failed"
-                            error_message = traceback.format_exc()
-
-                    if model_failed:
-                        print(f"  SKIPPING remaining items for {model} after the first failure")
-                        break
-            except KeyboardInterrupt:
-                status = "stopped_by_user"
-                error_message = "KeyboardInterrupt"
-                print(f"  STOPPED BY USER: {model}")
-                raise
-            except Exception as exc:
-                status = "failed"
-                error_message = repr(exc)
-                print(f"  MODEL FAILED: {traceback.format_exc()}")
-                if args.manage_models:
-                    raise
-            finally:
-                unload_error = None
-                if instance_id is not None:
-                    print(f"Unloading {model} instance {instance_id}...")
-                    try:
-                        client.unload_model(instance_id)
-                    except Exception as exc:
-                        unload_error = exc
-                        status = "unload_failed"
-                        error_message = repr(exc)
-                        print(f"  UNLOAD FAILED: {traceback.format_exc()}")
-                    else:
-                        print(f"Unloaded {model} instance {instance_id}")
-                index_writer.finish_run(
-                    batch_id,
-                    run_id,
-                    {
-                        **progress_metrics(
-                            total_rows, completed_rows, initial_completed, started_monotonic
-                        ),
-                        "status": status,
-                        "finished_at": datetime.now(timezone.utc).isoformat(),
-                        "rows_written": rows_written,
-                        "error": error_message,
-                    },
-                )
-                if unload_error is not None:
-                    raise RuntimeError(
-                        f"Refusing to continue because LM Studio instance {instance_id} could not be unloaded"
-                    ) from unload_error
-
-    print(f"\nDone. Results written to model-specific files using base {args.output}")
+    output_root = Path(args.output)
+    output_root.mkdir(parents=True, exist_ok=True)
+    index = RunIndex(output_root / "index.json")
+    failures = False
+    for entry in plan:
+        failures |= execute_run(
+            client,
+            index,
+            output_root,
+            entry,
+            items,
+            dataset_sha256,
+            runner_sha256,
+            args,
+            plan_provenance,
+        )
+    if failures:
+        raise SystemExit(1)
+    print(f"Done. Raw outputs are in {output_root}")
 
 
 if __name__ == "__main__":
