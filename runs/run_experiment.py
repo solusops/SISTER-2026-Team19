@@ -29,6 +29,13 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT = 600
 CONTEXT_LENGTH = 16384
+LMSTUDIO_LOAD_SETTINGS = {
+    "eval_batch_size": 2048,
+    "physical_batch_size": 512,
+    "parallel": 1,
+    "flash_attention": True,
+    "offload_kv_cache_to_gpu": True,
+}
 SYSTEM_PROMPT = (
     "You are a skilled creative writer. Follow the user's instructions "
     "for the story precisely, including any exact phrases, constraints, "
@@ -134,6 +141,7 @@ def summarize_model_record(record, backend):
             "selected_variant": record.get("digest"),
         }
     quantization = record.get("quantization") or {}
+    reasoning = (record.get("capabilities") or {}).get("reasoning") or {}
     return {
         "publisher": record.get("publisher"),
         "model_id": record.get("key"),
@@ -144,6 +152,7 @@ def summarize_model_record(record, backend):
         "quantization_bits": quantization.get("bits_per_weight"),
         "max_context_length": record.get("max_context_length"),
         "selected_variant": record.get("selected_variant"),
+        "reasoning_options": reasoning.get("allowed_options") or [],
     }
 
 
@@ -324,7 +333,7 @@ class LMStudioClient:
         response = self._request_json(
             "POST",
             "/models/load",
-            {"model": model, "context_length": context_length},
+            {"model": model, "context_length": context_length, **LMSTUDIO_LOAD_SETTINGS},
             base_url=self.management_url,
         )
         try:
@@ -550,6 +559,8 @@ def run_sharded(client, store, index, run, items, done, item, options):
 
 def make_run(entry, identity, dataset_sha256, runner_sha256, args):
     generation = {"temperature": args.temperature, "seed": args.seed}
+    if args.backend == "lmstudio" and "off" in (identity or {}).get("reasoning_options", []):
+        generation["reasoning"] = "off"
     protocol = {
         "system_prompt": SYSTEM_PROMPT,
         "conditions": list(CONDITIONS),
