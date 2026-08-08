@@ -370,6 +370,13 @@ class LMStudioClient:
         if not isinstance(content, str):
             raise RuntimeError(f"LM Studio returned non-text assistant content: {content!r}")
         metadata.update({"usage": response.get("usage"), "finish_reason": choice.get("finish_reason")})
+        reasoning_tokens = ((metadata["usage"] or {}).get("completion_tokens_details") or {}).get(
+            "reasoning_tokens", 0
+        )
+        if options.get("reasoning") == "off" and reasoning_tokens:
+            raise RuntimeError(
+                "LM Studio generated reasoning tokens despite reasoning='off'; refusing to save this response"
+            )
         return content
 
 
