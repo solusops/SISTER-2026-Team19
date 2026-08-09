@@ -29,6 +29,13 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_API_KEY = "lm-studio"
 DEFAULT_TIMEOUT = 600
 CONTEXT_LENGTH = 16384
+LMSTUDIO_LOAD_SETTINGS = {
+    "eval_batch_size": 2048,
+    "physical_batch_size": 512,
+    "parallel": 1,
+    "flash_attention": True,
+    "offload_kv_cache_to_gpu": True,
+}
 SYSTEM_PROMPT = (
     "You are a skilled creative writer. Follow the user's instructions "
     "for the story precisely, including any exact phrases, constraints, "
@@ -134,6 +141,13 @@ def summarize_model_record(record, backend):
             "selected_variant": record.get("digest"),
         }
     quantization = record.get("quantization") or {}
+    selected_variant = record.get("selected_variant")
+    if not selected_variant:
+        variants = record.get("variants") or []
+        if len(variants) == 1:
+            selected_variant = variants[0]
+        elif record.get("key") and quantization.get("name"):
+            selected_variant = f"{record['key']}@{quantization['name'].lower()}"
     return {
         "publisher": record.get("publisher"),
         "model_id": record.get("key"),
@@ -143,7 +157,7 @@ def summarize_model_record(record, backend):
         "quantization": quantization.get("name"),
         "quantization_bits": quantization.get("bits_per_weight"),
         "max_context_length": record.get("max_context_length"),
-        "selected_variant": record.get("selected_variant"),
+        "selected_variant": selected_variant,
     }
 
 
@@ -180,6 +194,11 @@ class RunIndex:
             for run in self.document["runs"]
             if run.get("config_fingerprint") == fingerprint
         ]
+
+    def get(self, run_id):
+        return next(
+            (run for run in self.document["runs"] if run.get("run_id") == run_id), None
+        )
 
     def add(self, run):
         self.document["runs"].append(run)
@@ -324,7 +343,7 @@ class LMStudioClient:
         response = self._request_json(
             "POST",
             "/models/load",
-            {"model": model, "context_length": context_length},
+            {"model": model, "context_length": context_length, **LMSTUDIO_LOAD_SETTINGS},
             base_url=self.management_url,
         )
         try:
@@ -443,6 +462,22 @@ def output_metrics(metadata, elapsed_seconds):
     return metrics
 
 
+def require_normal_completion(client, model_id, item, condition, turn):
+    """Keep context-truncated responses out of the immutable raw dataset."""
+    metadata = client.last_turn_metadata or {}
+    usage = metadata.get("usage") or {}
+    finish_reason = metadata.get("finish_reason")
+    if finish_reason is not None and finish_reason != "stop":
+        raise RuntimeError(
+            "Rejected non-normal completion before writing output: "
+            f"model={model_id!r}, item={item['domain']}/{item['item_id']!r}, "
+            f"condition={condition!r}, turn={turn}, finish_reason={finish_reason!r}, "
+            f"prompt_tokens={usage.get('prompt_tokens')!r}, "
+            f"completion_tokens={usage.get('completion_tokens')!r}, "
+            f"total_tokens={usage.get('total_tokens')!r}"
+        )
+
+
 def make_raw_record(run, item, condition, turn, is_final, attempt_id, text, metrics, sequence):
     identity = run["model"].get("identity") or {}
     return {
@@ -508,6 +543,7 @@ def run_full(client, store, index, run, items, done, item, options):
         options,
         run["model"]["context_length"],
     )
+    require_normal_completion(client, run["model"]["id"], item, "full", 1)
     write_turn(
         store,
         index,
@@ -531,6 +567,7 @@ def run_sharded(client, store, index, run, items, done, item, options):
         messages.append({"role": "user", "content": shard})
         started = time.monotonic()
         reply = client.chat(run["model"]["id"], messages, options, run["model"]["context_length"])
+        require_normal_completion(client, run["model"]["id"], item, "sharded", turn)
         write_turn(
             store,
             index,
@@ -550,6 +587,8 @@ def run_sharded(client, store, index, run, items, done, item, options):
 
 def make_run(entry, identity, dataset_sha256, runner_sha256, args):
     generation = {"temperature": args.temperature, "seed": args.seed}
+    if args.backend == "lmstudio":
+        generation["thinking_budget_tokens"] = 0
     protocol = {
         "system_prompt": SYSTEM_PROMPT,
         "conditions": list(CONDITIONS),
@@ -586,8 +625,21 @@ def expected_complete(items, done):
     return len(done) == len(items) * len(CONDITIONS)
 
 
-def select_run(index, store_root, draft, items, resume):
+def select_run(index, store_root, draft, items, resume, continue_run_id=None):
     """Reuse only the exact same configuration; different contexts make a new run."""
+    if continue_run_id:
+        selected = index.get(continue_run_id)
+        if selected is None:
+            raise RuntimeError(f"Unknown continuation run ID: {continue_run_id}")
+        if selected.get("status") not in ("failed", "stopped_by_user"):
+            raise RuntimeError(
+                f"Run {continue_run_id} is not failed or stopped: {selected.get('status')!r}"
+            )
+        if (selected.get("model") or {}).get("id") != draft["model"]["id"]:
+            raise RuntimeError("Continuation run model does not match --models")
+        store = RunStore(store_root, selected["model"]["id"])
+        store.reconcile()
+        return selected, store, store.done_keys(), False, True
     matches = index.find(draft["config_fingerprint"])
     if resume and matches:
         completed = [run for run in matches if run.get("status") == "completed"]
@@ -599,7 +651,7 @@ def select_run(index, store_root, draft, items, resume):
             raise RuntimeError(
                 f"Run {selected['run_id']} is marked completed but its raw output is incomplete"
             )
-        return selected, store, done, selected.get("status") == "completed"
+        return selected, store, done, selected.get("status") == "completed", False
     store = RunStore(store_root, draft["model"]["id"])
     run = {
         **draft,
@@ -613,7 +665,7 @@ def select_run(index, store_root, draft, items, resume):
     store.create()
     run["proof"] = store.proof()
     index.add(run)
-    return draft, store, set(), False
+    return draft, store, set(), False, False
 
 
 def execute_run(client, index, output_root, entry, items, dataset_sha256, runner_sha256, args):
@@ -624,20 +676,46 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
     except Exception as exc:
         metadata_error = repr(exc)
     draft = make_run(entry, identity, dataset_sha256, runner_sha256, args)
-    run, store, done, already_complete = select_run(index, output_root, draft, items, args.resume)
+    run, store, done, already_complete, continuing = select_run(
+        index, output_root, draft, items, args.resume, args.continue_run_id
+    )
     if already_complete:
         sync_proof(index, store, run["run_id"], items, done, "completed")
         index.update(run["run_id"], last_verified_at=now())
         print(f"Already complete: {entry['id']} ({run['run_id']})")
         return False
 
-    if run["run_id"] != draft["run_id"]:
+    if continuing:
+        segments = run.get("generation_segments") or [
+            {
+                "from_raw_sequence": 1,
+                "generation": run["generation"],
+                "runner_sha256": run["runner"]["sha256"],
+            }
+        ]
+        segments.append(
+            {
+                "from_raw_sequence": len(store.records) + 1,
+                "generation": draft["generation"],
+                "runner_sha256": runner_sha256,
+                "started_at": now(),
+            }
+        )
+        print(f"Continuing {entry['id']} ({run['run_id']}) with new generation settings")
+        index.update(
+            run["run_id"],
+            status="running",
+            resumed_at=now(),
+            error=None,
+            generation_segments=segments,
+        )
+    elif run["run_id"] != draft["run_id"]:
         print(f"Resuming {entry['id']} ({run['run_id']})")
         index.update(run["run_id"], status="running", resumed_at=now())
     else:
         index.update(run["run_id"], model_metadata_error=metadata_error)
     print(f"Run: {run['model']['id']} | output: {store.output_path}")
-    options = run["generation"].copy()
+    options = draft["generation"].copy() if continuing else run["generation"].copy()
     status = "completed"
     error_message = None
     instance_id = None
@@ -715,10 +793,16 @@ def main():
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     parser.add_argument("--limit", type=int, help="Only run the first N benchmark items")
     parser.add_argument("--resume", action="store_true", help="Resume or skip only an exact matching run")
+    parser.add_argument(
+        "--continue-run-id",
+        help="Continue a failed/stopped run with the requested generation settings and record a new segment",
+    )
     parser.add_argument("--output", default=OUT_PATH, help=f"Result directory (default: {OUT_PATH})")
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--seed", type=int, default=12345)
     args = parser.parse_args()
+    if args.resume and args.continue_run_id:
+        parser.error("--resume and --continue-run-id cannot be used together")
     if args.base_url is None:
         args.base_url = os.environ.get(
             "LM_STUDIO_BASE_URL" if args.backend == "lmstudio" else "OLLAMA_BASE_URL",
