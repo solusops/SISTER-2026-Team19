@@ -115,6 +115,29 @@ def append_jsonl(path, record):
         os.fsync(output.fileno())
 
 
+def atomic_write_jsonl(path, records):
+    """Atomically replace a JSONL dataset after rejecting unusable attempts."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        prefix=".experiment-", suffix=".jsonl", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            for record in records:
+                output.write(canonical_json(record))
+                output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def load_items(limit=None):
     dataset_path = Path(__file__).resolve().parent / DATA_PATH
     with dataset_path.open("r", encoding="utf-8") as source:
@@ -258,6 +281,29 @@ class RunStore:
         append_jsonl(self.output_path, record)
         append_jsonl(self.all_path, record)
         self.records.append(record)
+
+    def discard_attempts(self, attempt_ids):
+        """Remove unusable whole trajectories from both raw datasets."""
+        attempt_ids = set(attempt_ids)
+        discarded = [record for record in self.records if record.get("attempt_id") in attempt_ids]
+        if not discarded:
+            return []
+        discarded_ids = {record["record_id"] for record in discarded}
+        retained = [record for record in self.records if record["record_id"] not in discarded_ids]
+        combined = read_jsonl(self.all_path)
+        combined_ids = {record["record_id"] for record in combined}
+        missing = discarded_ids - combined_ids
+        if missing:
+            raise RuntimeError(
+                "Cannot discard corrupted attempts because their records are absent from all_results.jsonl"
+            )
+        atomic_write_jsonl(self.output_path, retained)
+        atomic_write_jsonl(
+            self.all_path,
+            [record for record in combined if record["record_id"] not in discarded_ids],
+        )
+        self.records = retained
+        return discarded
 
     def done_keys(self):
         return {
@@ -462,19 +508,40 @@ def output_metrics(metadata, elapsed_seconds):
     return metrics
 
 
-def require_normal_completion(client, model_id, item, condition, turn):
+class NonNormalCompletionError(RuntimeError):
+    """A generated reply that cannot be admitted to the raw evidence."""
+
+    def __init__(self, model_id, item, condition, turn, metadata, attempt_id):
+        self.model_id = model_id
+        self.item = item
+        self.condition = condition
+        self.turn = turn
+        self.metadata = metadata or {}
+        self.attempt_id = attempt_id
+        usage = self.metadata.get("usage") or {}
+        super().__init__(
+            "Rejected non-normal completion before writing output: "
+            f"model={model_id!r}, item={item['domain']}/{item['item_id']!r}, "
+            f"condition={condition!r}, turn={turn}, "
+            f"finish_reason={self.metadata.get('finish_reason')!r}, "
+            f"prompt_tokens={usage.get('prompt_tokens')!r}, "
+            f"completion_tokens={usage.get('completion_tokens')!r}, "
+            f"total_tokens={usage.get('total_tokens')!r}"
+        )
+
+
+class ContextOverflowStopped(RuntimeError):
+    """The configured second context-length response stopped a run cleanly."""
+
+
+def require_normal_completion(client, model_id, item, condition, turn, attempt_id):
     """Keep context-truncated responses out of the immutable raw dataset."""
     metadata = client.last_turn_metadata or {}
     usage = metadata.get("usage") or {}
     finish_reason = metadata.get("finish_reason")
     if finish_reason is not None and finish_reason != "stop":
-        raise RuntimeError(
-            "Rejected non-normal completion before writing output: "
-            f"model={model_id!r}, item={item['domain']}/{item['item_id']!r}, "
-            f"condition={condition!r}, turn={turn}, finish_reason={finish_reason!r}, "
-            f"prompt_tokens={usage.get('prompt_tokens')!r}, "
-            f"completion_tokens={usage.get('completion_tokens')!r}, "
-            f"total_tokens={usage.get('total_tokens')!r}"
+        raise NonNormalCompletionError(
+            model_id, item, condition, turn, metadata, attempt_id
         )
 
 
@@ -536,6 +603,7 @@ def write_turn(store, index, run, items, done, item, condition, turn, is_final, 
 
 
 def run_full(client, store, index, run, items, done, item, options):
+    attempt_id = uuid.uuid4().hex
     started = time.monotonic()
     reply = client.chat(
         run["model"]["id"],
@@ -543,7 +611,7 @@ def run_full(client, store, index, run, items, done, item, options):
         options,
         run["model"]["context_length"],
     )
-    require_normal_completion(client, run["model"]["id"], item, "full", 1)
+    require_normal_completion(client, run["model"]["id"], item, "full", 1, attempt_id)
     write_turn(
         store,
         index,
@@ -554,7 +622,7 @@ def run_full(client, store, index, run, items, done, item, options):
         "full",
         1,
         True,
-        uuid.uuid4().hex,
+        attempt_id,
         reply,
         output_metrics(client.last_turn_metadata, time.monotonic() - started),
     )
@@ -567,7 +635,9 @@ def run_sharded(client, store, index, run, items, done, item, options):
         messages.append({"role": "user", "content": shard})
         started = time.monotonic()
         reply = client.chat(run["model"]["id"], messages, options, run["model"]["context_length"])
-        require_normal_completion(client, run["model"]["id"], item, "sharded", turn)
+        require_normal_completion(
+            client, run["model"]["id"], item, "sharded", turn, attempt_id
+        )
         write_turn(
             store,
             index,
@@ -583,6 +653,123 @@ def run_sharded(client, store, index, run, items, done, item, options):
             output_metrics(client.last_turn_metadata, time.monotonic() - started),
         )
         messages.append({"role": "assistant", "content": reply})
+
+
+def sanitize_context_overflow_attempts(index, store, run, items):
+    """Discard whole old trajectories that contain a context-length reply."""
+    overflow_rows = [
+        record
+        for record in store.records
+        if record.get("metrics", {}).get("finish_reason") == "length"
+    ]
+    attempt_ids = {record.get("attempt_id") for record in overflow_rows if record.get("attempt_id")}
+    if not attempt_ids:
+        raise RuntimeError("No context-length attempt trajectories were found to discard")
+    discarded = store.discard_attempts(attempt_ids)
+    summary = {
+        "at": now(),
+        "reason": "context_length_responses_are_not_valid_evidence",
+        "attempt_count": len(attempt_ids),
+        "discarded_raw_records": len(discarded),
+        "affected_conditions": sorted(
+            {
+                f"{record['item']['domain']}/{record['item']['item_id']}/{record['condition']}"
+                for record in discarded
+            }
+        ),
+    }
+    done = store.done_keys()
+    sync_proof(index, store, run["run_id"], items, done, "stopped_context_overflow")
+    index.update(
+        run["run_id"],
+        context_cleanup=summary,
+        error="Context-length trajectories removed before controlled continuation",
+        finished_at=now(),
+    )
+    return done, summary
+
+
+def handle_context_overflow(index, store, run, items, done, overflow, options):
+    """Retry once with a new seed; discard partial sharded output on either overflow."""
+    discarded = store.discard_attempts({overflow.attempt_id})
+    done.clear()
+    done.update(store.done_keys())
+    usage = overflow.metadata.get("usage") or {}
+    events = list(run.get("context_overflow_events") or [])
+    event = {
+        "at": now(),
+        "condition": overflow.condition,
+        "item": f"{overflow.item['domain']}/{overflow.item['item_id']}",
+        "turn": overflow.turn,
+        "finish_reason": overflow.metadata.get("finish_reason"),
+        "usage": usage,
+        "discarded_raw_records": len(discarded),
+    }
+    if events:
+        event["action"] = "stopped_after_second_context_length"
+        events.append(event)
+        sync_proof(index, store, run["run_id"], items, done, "stopped_context_overflow")
+        index.update(
+            run["run_id"],
+            context_overflow_events=events,
+            error=str(overflow),
+            finished_at=now(),
+        )
+        raise ContextOverflowStopped(str(overflow))
+
+    retry_options = {**options, "seed": options["seed"] + 1}
+    event.update(
+        {
+            "action": "retry_with_new_seed",
+            "previous_seed": options["seed"],
+            "retry_seed": retry_options["seed"],
+        }
+    )
+    events.append(event)
+    segments = run.get("generation_segments") or [
+        {
+            "from_raw_sequence": 1,
+            "generation": run["generation"],
+            "runner_sha256": run["runner"]["sha256"],
+        }
+    ]
+    segments.append(
+        {
+            "from_raw_sequence": len(store.records) + 1,
+            "generation": retry_options,
+            "runner_sha256": run["runner"]["sha256"],
+            "started_at": now(),
+            "reason": "first_context_length_retry",
+        }
+    )
+    index.update(
+        run["run_id"],
+        context_overflow_events=events,
+        generation_segments=segments,
+    )
+    sync_proof(index, store, run["run_id"], items, done, "running")
+    print(
+        f"Context-length response at {event['item']} {overflow.condition} turn {overflow.turn}; "
+        f"retrying with seed {retry_options['seed']}"
+    )
+    return retry_options
+
+
+def run_condition_with_context_retry(client, store, index, run, items, done, item, condition, options):
+    """Run one condition, retrying only the first context-length response."""
+    while True:
+        try:
+            if condition == "full":
+                run_full(client, store, index, run, items, done, item, options)
+            else:
+                run_sharded(client, store, index, run, items, done, item, options)
+            return options
+        except NonNormalCompletionError as overflow:
+            if overflow.metadata.get("finish_reason") != "length":
+                raise
+            options = handle_context_overflow(
+                index, store, run, items, done, overflow, options
+            )
 
 
 def make_run(entry, identity, dataset_sha256, runner_sha256, args):
@@ -631,7 +818,11 @@ def select_run(index, store_root, draft, items, resume, continue_run_id=None):
         selected = index.get(continue_run_id)
         if selected is None:
             raise RuntimeError(f"Unknown continuation run ID: {continue_run_id}")
-        if selected.get("status") not in ("failed", "stopped_by_user"):
+        if selected.get("status") not in (
+            "failed",
+            "stopped_by_user",
+            "stopped_context_overflow",
+        ):
             raise RuntimeError(
                 f"Run {continue_run_id} is not failed or stopped: {selected.get('status')!r}"
             )
@@ -676,6 +867,19 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
     except Exception as exc:
         metadata_error = repr(exc)
     draft = make_run(entry, identity, dataset_sha256, runner_sha256, args)
+    if args.discard_context_overflow_attempts:
+        selected = index.get(args.continue_run_id)
+        if selected is None:
+            raise RuntimeError(f"Unknown continuation run ID: {args.continue_run_id}")
+        if (selected.get("model") or {}).get("id") != entry["id"]:
+            raise RuntimeError("Context cleanup run does not match --models")
+        store = RunStore(output_root, entry["id"])
+        store.reconcile()
+        _, cleanup = sanitize_context_overflow_attempts(index, store, selected, items)
+        print(
+            f"Discarded {cleanup['discarded_raw_records']} corrupted rows across "
+            f"{cleanup['attempt_count']} context-length trajectories"
+        )
     run, store, done, already_complete, continuing = select_run(
         index, output_root, draft, items, args.resume, args.continue_run_id
     )
@@ -736,7 +940,13 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
             sharded_key = (item["domain"], item["item_id"], "sharded")
             if full_key not in done:
                 try:
-                    run_full(client, store, index, run, items, done, item, options)
+                    options = run_condition_with_context_retry(
+                        client, store, index, run, items, done, item, "full", options
+                    )
+                except ContextOverflowStopped as exc:
+                    model_failed = True
+                    status = "stopped_context_overflow"
+                    error_message = str(exc)
                 except Exception:
                     model_failed = True
                     status = "failed"
@@ -745,7 +955,13 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
                 break
             if sharded_key not in done:
                 try:
-                    run_sharded(client, store, index, run, items, done, item, options)
+                    options = run_condition_with_context_retry(
+                        client, store, index, run, items, done, item, "sharded", options
+                    )
+                except ContextOverflowStopped as exc:
+                    model_failed = True
+                    status = "stopped_context_overflow"
+                    error_message = str(exc)
                 except Exception:
                     model_failed = True
                     status = "failed"
@@ -782,6 +998,24 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
     return model_failed
 
 
+def wait_for_run(index_path, run_id, poll_seconds):
+    """Wait without changing the index until one explicit predecessor completes."""
+    print(f"Waiting for predecessor run {run_id} before starting this model...")
+    while True:
+        predecessor = RunIndex(index_path).get(run_id)
+        if predecessor is None:
+            raise RuntimeError(f"Unknown predecessor run ID: {run_id}")
+        status = predecessor.get("status")
+        if status == "completed":
+            print(f"Predecessor {run_id} completed; starting queued model")
+            return
+        if status != "running":
+            raise RuntimeError(
+                f"Predecessor {run_id} ended with status {status!r}; queued model will not start"
+            )
+        time.sleep(poll_seconds)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=("lmstudio", "ollama"), default="lmstudio")
@@ -797,12 +1031,33 @@ def main():
         "--continue-run-id",
         help="Continue a failed/stopped run with the requested generation settings and record a new segment",
     )
+    parser.add_argument(
+        "--discard-context-overflow-attempts",
+        action="store_true",
+        help="Before a continuation, remove whole old trajectories containing finish_reason=length",
+    )
+    parser.add_argument(
+        "--wait-for-run-id",
+        help="Wait for this run to complete before making any index or result changes",
+    )
+    parser.add_argument(
+        "--wait-poll-seconds",
+        type=float,
+        default=30,
+        help="Polling interval for --wait-for-run-id (default: 30)",
+    )
     parser.add_argument("--output", default=OUT_PATH, help=f"Result directory (default: {OUT_PATH})")
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--seed", type=int, default=12345)
     args = parser.parse_args()
     if args.resume and args.continue_run_id:
         parser.error("--resume and --continue-run-id cannot be used together")
+    if args.discard_context_overflow_attempts and not args.continue_run_id:
+        parser.error("--discard-context-overflow-attempts requires --continue-run-id")
+    if args.continue_run_id and (not args.models or len(args.models) != 1):
+        parser.error("--continue-run-id requires exactly one model")
+    if args.wait_poll_seconds <= 0:
+        parser.error("--wait-poll-seconds must be positive")
     if args.base_url is None:
         args.base_url = os.environ.get(
             "LM_STUDIO_BASE_URL" if args.backend == "lmstudio" else "OLLAMA_BASE_URL",
@@ -831,6 +1086,9 @@ def main():
     output_root = Path(args.output)
     output_root.mkdir(parents=True, exist_ok=True)
     index = RunIndex(output_root / "index.json")
+    if args.wait_for_run_id:
+        wait_for_run(index.path, args.wait_for_run_id, args.wait_poll_seconds)
+        index = RunIndex(index.path)
     index.set_batch(entry["id"] for entry in models)
     failures = False
     for entry in models:
