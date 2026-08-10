@@ -101,5 +101,6 @@ Anshuman Singh — [anshumanr434@gmail.com](mailto:anshumanr434@gmail.com)
 ## Manuscript source
 
 [`paper/`](paper/) retains the editable manuscript source as part of the study
-record. This repository deliberately does not include a PDF build workflow,
-compiled manuscript, or document-generation service.
+record. GitHub Actions compiles `paper/main.tex` and exposes `paper/main.pdf`
+as a downloadable workflow artifact; generated PDFs and local build scripts
+are not committed to the repository.
