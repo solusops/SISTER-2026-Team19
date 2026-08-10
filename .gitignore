@@ -1,5 +1,5 @@
 # ==============================================================================
-# LaTeX Ignore Rules
+# Generated manuscript artifacts
 # ==============================================================================
 
 # Auxiliary & Build Artifacts
@@ -10,7 +10,6 @@ build/
 *.brf
 *.bcf
 *.fls
-*.fdb_latexmk
 *.idx
 *.ilg
 *.ind
@@ -33,10 +32,6 @@ build/
 *.snm
 *.vrb
 *-blx.bib
-
-# Compiled PDF (Root PDF compiled locally; keep git clean, CI will generate on push)
-# Uncomment the line below if you prefer NOT to track the root compiled PDF in Git:
-# main.pdf
 
 # TeX Live / MiKTeX Temporary Files
 *.dvi

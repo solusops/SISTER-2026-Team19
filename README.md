@@ -33,13 +33,10 @@ inference configurations for reproducibility.
 | [`runs/results/`](runs/results/) | The active, flat generation dataset: one JSONL file per model, `all_results.jsonl`, and `index.json` provenance. |
 | [`runs/test/older_outputs/`](runs/test/older_outputs/) | Isolated partial, diagnostic, and superseded outputs; not part of the active study dataset. |
 | [`evaluations/`](evaluations/) | Reserved for future derived evaluation data and protocol documentation; separate from raw model generations. |
-| [`sections/`](sections/) | Modular manuscript sections. |
-| [`figures/`](figures/) | Publication figures and their source files. |
-| [`tables/`](tables/) | Publication tables. |
-| [`references.bib`](references.bib) | Literature bibliography for the manuscript. |
+| [`paper/`](paper/) | Editable manuscript source, bibliography, figures, tables, and macros retained as a research draft; no PDF build workflow is maintained here. |
 
 The root is deliberately reserved for project-level material: this README,
-citation metadata, licensing, and the manuscript entry point. Operational
+citation metadata, licensing, and the three project areas above. Operational
 details belong in [`runs/README.md`](runs/README.md), rather than here.
 
 ## Reproducing a model run
@@ -103,7 +100,6 @@ Anshuman Singh — [anshumanr434@gmail.com](mailto:anshumanr434@gmail.com)
 
 ## Manuscript source
 
-The paper source is modular and can be compiled locally with `make` (Linux,
-macOS, or WSL) or `./build.ps1` (Windows PowerShell). Build commands are kept
-here only for contributors editing the manuscript; this is a research
-repository first, not a LaTeX template or PDF-conversion service.
+[`paper/`](paper/) retains the editable manuscript source as part of the study
+record. This repository deliberately does not include a PDF build workflow,
+compiled manuscript, or document-generation service.
