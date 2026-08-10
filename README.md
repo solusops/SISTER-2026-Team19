@@ -32,6 +32,7 @@ inference configurations for reproducibility.
 | [`runs/`](runs/) | Evaluation runner, fixed task data, documented procedures, merger, dashboard, and active results. |
 | [`runs/results/`](runs/results/) | The active, flat generation dataset: one JSONL file per model, `all_results.jsonl`, and `index.json` provenance. |
 | [`runs/test/older_outputs/`](runs/test/older_outputs/) | Isolated partial, diagnostic, and superseded outputs; not part of the active study dataset. |
+| [`evaluations/`](evaluations/) | Reserved for future derived evaluation data and protocol documentation; separate from raw model generations. |
 | [`sections/`](sections/) | Modular manuscript sections. |
 | [`figures/`](figures/) | Publication figures and their source files. |
 | [`tables/`](tables/) | Publication tables. |
@@ -73,6 +74,10 @@ generation settings, context segments, progress, and integrity metadata;
 Generation records are research artifacts, not interpreted findings. Analysis
 tables and paper claims should be added only after the evaluation protocol and
 scoring procedure have been finalized.
+
+Future derived scores and annotations belong in [`evaluations/`](evaluations/).
+They must reference generation `record_id` values and must not modify the raw
+files under `runs/results/`.
 
 ## Citation
 
