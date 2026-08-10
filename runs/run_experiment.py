@@ -184,12 +184,12 @@ def summarize_model_record(record, backend):
     }
 
 
-def resolve_models(models):
+def resolve_models(models, context_length=CONTEXT_LENGTH):
     if not models:
         raise ValueError("--models is required unless --list-models is used by itself")
     if len(set(models)) != len(models):
         raise ValueError("--models cannot contain duplicate model IDs")
-    return [{"id": model, "context_length": CONTEXT_LENGTH} for model in models]
+    return [{"id": model, "context_length": context_length} for model in models]
 
 
 class RunIndex:
@@ -905,6 +905,21 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
                 "started_at": now(),
             }
         )
+        context_segments = run.get("context_segments") or [
+            {
+                "from_raw_sequence": 1,
+                "context_length": run["model"]["context_length"],
+            }
+        ]
+        if context_segments[-1]["context_length"] != entry["context_length"]:
+            context_segments.append(
+                {
+                    "from_raw_sequence": len(store.records) + 1,
+                    "context_length": entry["context_length"],
+                    "started_at": now(),
+                }
+            )
+        run["model"]["context_length"] = entry["context_length"]
         print(f"Continuing {entry['id']} ({run['run_id']}) with new generation settings")
         index.update(
             run["run_id"],
@@ -912,6 +927,8 @@ def execute_run(client, index, output_root, entry, items, dataset_sha256, runner
             resumed_at=now(),
             error=None,
             generation_segments=segments,
+            context_segments=context_segments,
+            runner={"name": Path(__file__).name, "sha256": runner_sha256},
         )
     elif run["run_id"] != draft["run_id"]:
         print(f"Resuming {entry['id']} ({run['run_id']})")
@@ -1049,6 +1066,12 @@ def main():
     parser.add_argument("--output", default=OUT_PATH, help=f"Result directory (default: {OUT_PATH})")
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument(
+        "--context-length",
+        type=int,
+        default=CONTEXT_LENGTH,
+        help=f"Context window in tokens (default: {CONTEXT_LENGTH})",
+    )
     args = parser.parse_args()
     if args.resume and args.continue_run_id:
         parser.error("--resume and --continue-run-id cannot be used together")
@@ -1058,13 +1081,15 @@ def main():
         parser.error("--continue-run-id requires exactly one model")
     if args.wait_poll_seconds <= 0:
         parser.error("--wait-poll-seconds must be positive")
+    if args.context_length < 1:
+        parser.error("--context-length must be positive")
     if args.base_url is None:
         args.base_url = os.environ.get(
             "LM_STUDIO_BASE_URL" if args.backend == "lmstudio" else "OLLAMA_BASE_URL",
             LMSTUDIO_BASE_URL if args.backend == "lmstudio" else OLLAMA_BASE_URL,
         )
     try:
-        models = resolve_models(args.models) if args.models else None
+        models = resolve_models(args.models, args.context_length) if args.models else None
         items = load_items(args.limit) if models else None
     except (ValueError, RuntimeError) as exc:
         parser.error(str(exc))
