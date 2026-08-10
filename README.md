@@ -1,97 +1,104 @@
-# SISTER Paper Repository
+# The Effects of Incremental Instruction Delivery on Language-Model Creative Writing
 
-This repository is set up for collaborative, local LaTeX drafting of the **SISTER** research paper.
+This repository contains the study materials, evaluation software, generation
+records, and manuscript source for an empirical study of instruction-delivery
+robustness in language-model creative writing.
 
----
+> **Project status:** Manuscript in preparation (2026). This repository is not
+> an arXiv preprint or a publication record yet.
 
-## 📁 Repository Structure
+## Research question
 
-```
-SISTER/
-├── .github/workflows/
-│   └── build-pdf.yml       # Automatic PDF compilation via GitHub Actions
-├── .vscode/
-│   └── settings.json       # Configured for VS Code + LaTeX Workshop
-├── figures/                # Figures, diagrams, and TikZ sources
-│   ├── overview.pdf        # System diagram vector PDF
-│   └── overview.tex        # TikZ source for system diagram
-├── tables/                 # Standalone table files (optional inclusion)
-├── sections/               # Modular LaTeX paper sections
-│   ├── 00_abstract.tex
-│   ├── 01_introduction.tex
-│   ├── 02_related_work.tex
-│   ├── 03_methodology.tex
-│   ├── 04_experiments.tex
-│   ├── 05_discussion.tex
-│   ├── 06_conclusion.tex
-│   └── 99_appendix.tex
-├── macros/                 # Custom macros and commands
-│   ├── comments.tex        # Draft mode toggle & team author comments
-│   └── commands.tex        # Custom math operators & shortcuts
-├── build/                  # Out-of-tree build directory (git-ignored)
-├── main.tex                # Root LaTeX file
-├── references.bib          # BibTeX bibliography database
-├── .latexmkrc              # Latexmk build pipeline configuration
-├── Makefile                # Build automation (Linux / macOS / WSL)
-├── build.ps1               # Build automation (Windows PowerShell)
-└── README.md
-```
+When a language model receives the same final story specification, does its
+output differ when the instructions are presented incrementally across a
+conversation rather than all at once in a single prompt?
 
----
+The study compares two semantically matched conditions:
 
-## 🚀 Quick Start & Compilation
+- **Full instruction:** the complete story specification is supplied before
+  generation.
+- **Incremental instruction:** the same specification is revealed across
+  multiple conversational turns.
 
-### Option 1: VS Code (Recommended)
-1. Install the **LaTeX Workshop** extension in VS Code.
-2. Open `main.tex`.
-3. Press `Ctrl + Alt + B` (Windows/Linux) or `Cmd + Option + B` (macOS) to build.
-4. Click the **View LaTeX PDF** button in the top-right toolbar.
+The analysis focuses on constraint retention, contradiction, coherence, and
+the natural integration of later instructions. It does not treat model family,
+parameter count, or quantization as causal variables; these are recorded as
+inference configurations for reproducibility.
 
-### Option 2: Windows PowerShell
-```powershell
-# Standard compilation
-.\build.ps1
+## Repository guide
 
-# Continuous watch mode (recompiles on save)
-.\build.ps1 -Watch
+| Path | Contents |
+| --- | --- |
+| [`runs/`](runs/) | Evaluation runner, fixed task data, documented procedures, merger, dashboard, and active results. |
+| [`runs/results/`](runs/results/) | The active, flat generation dataset: one JSONL file per model, `all_results.jsonl`, and `index.json` provenance. |
+| [`runs/test/older_outputs/`](runs/test/older_outputs/) | Isolated partial, diagnostic, and superseded outputs; not part of the active study dataset. |
+| [`sections/`](sections/) | Modular manuscript sections. |
+| [`figures/`](figures/) | Publication figures and their source files. |
+| [`tables/`](tables/) | Publication tables. |
+| [`references.bib`](references.bib) | Literature bibliography for the manuscript. |
 
-# Clean build artifacts
-.\build.ps1 -Clean
-```
+The root is deliberately reserved for project-level material: this README,
+citation metadata, licensing, and the manuscript entry point. Operational
+details belong in [`runs/README.md`](runs/README.md), rather than here.
 
-### Option 3: Command Line / Makefile (macOS / Linux / WSL)
+## Reproducing a model run
+
+The evaluator supports LM Studio and Ollama through their local
+OpenAI-compatible interfaces. Start with the exact installed model identifier:
+
 ```bash
-# Compile paper
-make
-
-# Watch mode
-make watch
-
-# Clean auxiliary build files
-make clean
+python3 runs/run_experiment.py --backend lmstudio --list-models
+python3 runs/run_experiment.py --backend ollama --list-models
 ```
 
----
+Then run one explicitly selected model:
 
-## 👥 Team Collaboration Guidelines
+```bash
+python3 runs/run_experiment.py --backend lmstudio --models publisher/model-id
+```
 
-1. **One Sentence Per Line**:
-   Write `.tex` source files with **one sentence per line**. This dramatically reduces Git merge conflicts when co-authors edit the same paragraph.
-2. **Author Comments**:
-   Use team comment macros defined in `macros/comments.tex`:
-   - `\todo{Refine proof}`
-   - `\authorA{Check equation 3}`
-   - `\authorB{Updated numbers}`
-   Toggle off all comments before submission by setting `\draftfalse` in `macros/comments.tex`.
-3. **Custom Math Shortcuts**:
-   Add shared notation to `macros/commands.tex` (e.g., `\R`, `\E`, `\argmax`).
-4. **Vector Figures**:
-   Place PDF/EPS vector graphics in `figures/` for crisp output.
+Use the full [evaluation guide](runs/README.md) for smoke tests,
+continuations, result validation, and merging independently completed model
+runs. The active result root is intentionally flat so that each model’s output
+and the combined dataset can be inspected without a run-directory hierarchy.
 
----
+## Active data
 
-## 🎯 Target Venue Template Integration
+The current active dataset contains completed generation records for six local
+model configurations. Each active model has 320 final conditions and 1,156 raw
+records. `runs/results/index.json` records the exact model identity, quant,
+generation settings, context segments, progress, and integrity metadata;
+`all_results.jsonl` is the combined independent dataset.
 
-This repository defaults to a clean `article` class setup. If submitting to a specific venue (e.g. IEEE, ACM, NeurIPS, ICML, Springer LNCS):
-1. Copy the target `.cls` file (or `IEEEtran.cls`, `acmart.cls`, etc.) into the root directory.
-2. Update the `\documentclass{...}` at the top of `main.tex`.
+Generation records are research artifacts, not interpreted findings. Analysis
+tables and paper claims should be added only after the evaluation protocol and
+scoring procedure have been finalized.
+
+## Citation
+
+If this repository or its materials inform your work, cite the current
+manuscript as follows:
+
+```bibtex
+@misc{incremental_instruction_creative_writing_2026,
+  title  = {The Effects of Incremental Instruction Delivery on Language-Model Creative Writing},
+  author = {Anshuman Singh and Abrar Eyasir and Haseeb Yaqoob and John Manavalan},
+  year   = {2026},
+  note   = {Manuscript in preparation}
+}
+```
+
+The citation key is an internal BibTeX label; it is not part of the paper
+title or the author list. Citation metadata is also available in
+[`CITATION.cff`](CITATION.cff).
+
+## Contact
+
+Anshuman Singh — [anshumanr434@gmail.com](mailto:anshumanr434@gmail.com)
+
+## Manuscript source
+
+The paper source is modular and can be compiled locally with `make` (Linux,
+macOS, or WSL) or `./build.ps1` (Windows PowerShell). Build commands are kept
+here only for contributors editing the manuscript; this is a research
+repository first, not a LaTeX template or PDF-conversion service.
