@@ -171,6 +171,7 @@ def summarize_model_record(record, backend):
             selected_variant = variants[0]
         elif record.get("key") and quantization.get("name"):
             selected_variant = f"{record['key']}@{quantization['name'].lower()}"
+    reasoning = (record.get("capabilities") or {}).get("reasoning") or {}
     return {
         "publisher": record.get("publisher"),
         "model_id": record.get("key"),
@@ -181,6 +182,7 @@ def summarize_model_record(record, backend):
         "quantization_bits": quantization.get("bits_per_weight"),
         "max_context_length": record.get("max_context_length"),
         "selected_variant": selected_variant,
+        "reasoning_options": reasoning.get("allowed_options") or [],
     }
 
 
@@ -426,6 +428,13 @@ class LMStudioClient:
         if not isinstance(content, str):
             raise RuntimeError(f"LM Studio returned non-text assistant content: {content!r}")
         metadata.update({"usage": response.get("usage"), "finish_reason": choice.get("finish_reason")})
+        reasoning_tokens = ((metadata["usage"] or {}).get("completion_tokens_details") or {}).get(
+            "reasoning_tokens", 0
+        )
+        if options.get("reasoning") == "off" and reasoning_tokens:
+            raise RuntimeError(
+                "LM Studio generated reasoning tokens despite reasoning='off'; refusing to save this response"
+            )
         return content
 
 
@@ -776,6 +785,10 @@ def make_run(entry, identity, dataset_sha256, runner_sha256, args):
     generation = {"temperature": args.temperature, "seed": args.seed}
     if args.backend == "lmstudio":
         generation["thinking_budget_tokens"] = 0
+    if args.backend == "lmstudio":
+        generation["thinking_budget_tokens"] = 0
+        if "off" in (identity or {}).get("reasoning_options", []):
+            generation["reasoning"] = "off"
     protocol = {
         "system_prompt": SYSTEM_PROMPT,
         "conditions": list(CONDITIONS),
