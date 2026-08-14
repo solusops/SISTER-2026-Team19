@@ -49,6 +49,9 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 
+# Project-local Python environment for development tools (including Hugging Face CLI)
+/.venv/
+
 # Generated manuscript output is available through the CI artifact, not Git.
 /paper/main.pdf
 /paper/build/

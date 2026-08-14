@@ -46,6 +46,28 @@ records. `runs/results/index.json` records the exact model identity, quant,
 generation settings, context segments, progress, and integrity metadata;
 `all_results.jsonl` is the combined independent dataset.
 
+## Datasets on Hugging Face
+
+This repository holds the working code and files; two of those files are
+also published on the Hub as standalone, independently versioned dataset
+repos so they can be cited and reused apart from this codebase:
+
+- **[`sister-benchmark`](https://huggingface.co/datasets/SolusOps/sister-benchmark)**:
+  the 160-task benchmark (`runs/benchmark_data.json`). The reusable
+  artifact: load this to evaluate your own model against the same tasks.
+- **[`sister-benchmark-generations`](https://huggingface.co/datasets/SolusOps/sister-benchmark-generations)**:
+  our baseline models' raw outputs on that benchmark (`runs/results/`),
+  one split per model. Evidence for this paper, not part of the benchmark
+  definition itself.
+
+They're separate repos, not branches or configs of one repo, because they
+version independently: the benchmark grows over time (new task versions,
+tagged releases), while the generations repo grows with new experiment
+runs. See `runs/BENCHMARK.md`, `runs/results/README.md`, and
+`runs/hf_upload/README.md` for the full rationale and the push scripts.
+
+
+
 ## Citation
 
 If this repository or its materials inform your work, cite the current
