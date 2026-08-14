@@ -17,8 +17,14 @@ edit a raw generation file.
 - `constraint_schema.json` — schema and taxonomy for `constraints.jsonl`,
   including how it was generated and its current validation status.
 
+- `human_validation/` â€” matched 30-pair evaluator validation: sanitized
+  primary and reversed case files, frozen model judgments and SHA-256
+  receipts, ordinal analysis-only encoding, position-consistency results, and
+  the reproducible validation script. No human annotation export is present
+  in this repository, so human-agreement statistics remain uncomputed.
+
 ## Not yet built
 
-Judge harness (constraint adherence + quality scoring), pairwise blind
-evaluation, and the statistics/analysis layer. See project discussion for the
-proposed design.
+Pointwise-score aggregation and the full statistics/analysis layer. The
+matched pairwise human-vs-model analysis will run only when a human annotation
+export is supplied after both model passes are frozen.
