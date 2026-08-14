@@ -56,6 +56,10 @@ __pycache__/
 /paper/main.pdf
 /paper/build/
 
+# Temporary local human-review app and private join manifest
+/evaluations/.tmp_human_review/
+/evaluations/.tmp_pairwise_model_validation/
+
 # Local agent scaffolding and machine-specific project indexes
 /AGENTS.md
 /CLAUDE.md
