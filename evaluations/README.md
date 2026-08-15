@@ -21,10 +21,10 @@ edit a raw generation file.
   primary and reversed case files, frozen model judgments and SHA-256
   receipts, ordinal analysis-only encoding, position-consistency results, and
   the reproducible validation script. The human export is committed as
-  `annotations.jsonl` and now covers all 30 cases; the committed
-  `human_model_agreement_summary.json` / `human_model_disagreements.md`
-  still reflect the earlier 11-case partial export and need regenerating
-  against the full 30 before being trusted.
+  `annotations.jsonl` and now covers all 30 cases; `analyze_human_model_agreement.py`
+  (+ its test) computes `human_model_agreement_summary.json` and
+  `human_model_disagreements.md` from it against the model's primary-order
+  judgments.
 - `human_validation/evidence_first_*.jsonl` â€” a separate, fully blinded
   evidence-first primary/reversed pairwise study on the same 30 cases. Each
   record includes per-constraint status/evidence and eight grounded creative
