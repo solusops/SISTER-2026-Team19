@@ -34,11 +34,12 @@ needs no local model server — only the recorded outputs and scores below.
 ## Data
 
 The benchmark, generations, judge scores, and evaluator/human-validation
-outputs are published on Hugging Face as one dataset repo, six configs:
+outputs are published on Hugging Face as one dataset repo, seven configs:
 
 - **[`incremental-instruction-creative-writing`](https://huggingface.co/datasets/solusops/incremental-instruction-creative-writing)**
   — `benchmark`, `generations`, `pointwise_scores`, `pairwise_validation`,
-  `evidence_first_validation`, `human_eval`. Load any config with
+  `evidence_first_validation`, `human_eval_sample`,
+  `human_eval_annotations`. Load any config with
   `datasets.load_dataset(repo_id, config_name=...)`.
 
 An earlier, narrower two-repo split
