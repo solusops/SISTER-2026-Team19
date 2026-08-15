@@ -40,11 +40,6 @@ Hugging Face as one dataset repo:
 
 Load any config with `datasets.load_dataset(repo_id, config_name=...)`.
 
-An earlier, narrower two-repo split
-([`sister-benchmark`](https://huggingface.co/datasets/SolusOps/sister-benchmark),
-[`sister-benchmark-generations`](https://huggingface.co/datasets/SolusOps/sister-benchmark-generations))
-remains published for existing citations to it.
-
 ## Generation
 
 Generation runs against a local model server (LM Studio or Ollama, via
@@ -73,24 +68,37 @@ python3 runs/run_experiment.py --backend lmstudio --models publisher/model-id
 Each final generation is judged against its task's atomic constraints on a
 0 / 0.5 / 1 adherence scale (with a short reason per constraint), plus five
 anchored 1–5 creative-quality dimensions (craft, structure and coherence,
-originality, genre effectiveness, characterization). The full rubric and
-blinding contract are published alongside the scores in the dataset repo
-(`methodology/` files, and `model_evaluations` for the scores themselves).
+originality, genre effectiveness, characterization). The exact rubric,
+blinding contract, and judge instructions are in `evaluations/`:
+
+- `evaluations/judge_config.json` — the rubric and blinding contract.
+- `evaluations/prepare_native_judge_batches.mjs` — builds the blinded input
+  batches from the `generations` and benchmark configs.
+- `evaluations/native_judge_worker_instructions.md` (+ `_long_`/`_repair_`
+  variants) — the exact instructions given to the judge for standard,
+  long-output, and repair batches respectively.
+- `evaluations/merge_scores.py` — merges and validates the raw judging
+  passes into the canonical `model_evaluations` scores.
 
 ## Evaluator and human validation
 
 Two independent pairwise evaluators — a standard preference judge
-(`judge_comparisons`) and an evidence-first evaluator that audits every
-constraint before choosing a preference (`judge_audit`) — were each run in
-original and reversed response order over the same fixed 30-case sample
+(`judge_comparisons`, run by `evaluations/human_validation/validate_pairwise_validation.mjs`)
+and an evidence-first evaluator that audits every constraint before
+choosing a preference (`judge_audit`, run by
+`evaluations/human_validation/evaluate_evidence_first.mjs`) — were each run
+in original and reversed response order over the same fixed 30-case sample
 also shown to human annotators (`human_eval_cases` / `human_eval`), to
 check for position bias and evaluator-human agreement.
 
 ## Result analysis
 
+`analysis/analyze_human_model_agreement.py` computes exact/directional
+agreement and weighted Cohen's kappa between the human judgments and the
+model evaluator's primary-order judgments over the full 30-case sample.
 Paired statistical analysis over the judge scores (constraint-loss vs.
 creative-quality effects across conditions) is in progress; this section
-will be filled in once that lands.
+will be filled in further once that lands.
 
 ## Citation
 

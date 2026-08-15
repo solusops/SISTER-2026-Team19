@@ -67,22 +67,34 @@ __pycache__/
 # Local working notes, not part of the study
 /extra/
 
-# Everything else is local-only tooling and data that's published on
-# Hugging Face instead (SolusOps/incremental-instruction-creative-writing):
-# judging scripts, judge prompts/scores, human-validation artifacts, merge
-# and dataset-publishing scripts, the dashboard, tests, diagnostic run
-# history, and the raw benchmark/generation data itself. GitHub carries
-# only the manuscript and the generation script. All of this stays on disk,
-# just untracked -- see git history before this cleanup for what was
-# previously tracked, and .mex/ROUTER.md locally for where things live now.
-/evaluations/
+# Data lives on Hugging Face (SolusOps/incremental-instruction-creative-writing),
+# not here: judge batches/scores, generation records, human-validation
+# records, and the benchmark JSON itself. GitHub carries the code that
+# produced/evaluated/analyzed that data instead (see evaluations/,
+# analysis/), plus the manuscript and the generation script -- not raw
+# judge batches, generated outputs, dashboards, temp files, or tests.
 /runs/results/
 /runs/test/
 /runs/benchmark_data.json
 /runs/BENCHMARK.md
 /runs/README.md
-/runs/merge_results.py
 /runs/monitor_dashboard.py
 /runs/test_merge_results.py
 /runs/test_run_experiment.py
 /runs/hf_upload/
+
+/evaluations/*
+!/evaluations/README.md
+!/evaluations/judge_config.json
+!/evaluations/merge_scores.py
+!/evaluations/prepare_native_judge_batches.mjs
+!/evaluations/native_judge_worker_instructions.md
+!/evaluations/native_judge_long_worker_instructions.md
+!/evaluations/native_judge_repair_worker_instructions.md
+!/evaluations/human_validation
+/evaluations/human_validation/*
+!/evaluations/human_validation/evaluate_evidence_first.mjs
+!/evaluations/human_validation/validate_pairwise_validation.mjs
+
+/analysis/*
+!/analysis/analyze_human_model_agreement.py
