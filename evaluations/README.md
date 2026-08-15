@@ -20,10 +20,11 @@ edit a raw generation file.
 - `human_validation/` â€” matched 30-pair evaluator validation: sanitized
   primary and reversed case files, frozen model judgments and SHA-256
   receipts, ordinal analysis-only encoding, position-consistency results, and
-  the reproducible validation script. The source human export is external to
-  the repository; its 11 completed cases are represented by the committed
-  agreement summary and disagreement table, while the remaining 19 cases are
-  not imputed or silently dropped from the reported denominator.
+  the reproducible validation script. The human export is committed as
+  `annotations.jsonl` and now covers all 30 cases; the committed
+  `human_model_agreement_summary.json` / `human_model_disagreements.md`
+  still reflect the earlier 11-case partial export and need regenerating
+  against the full 30 before being trusted.
 - `human_validation/evidence_first_*.jsonl` â€” a separate, fully blinded
   evidence-first primary/reversed pairwise study on the same 30 cases. Each
   record includes per-constraint status/evidence and eight grounded creative
