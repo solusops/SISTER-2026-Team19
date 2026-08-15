@@ -1,8 +1,7 @@
 # The Effects of Incremental Instruction Delivery on Language-Model Creative Writing
 
-This repository contains the evaluation software, generation
-records, and manuscript source for an empirical study of instruction-delivery
-robustness in language-model creative writing.
+Does splitting a story's instructions across a conversation, instead of
+giving them all at once, change what a language model writes?
 
 ## Research question
 
@@ -18,60 +17,85 @@ The study compares two semantically matched conditions:
   multiple conversational turns.
 
 The analysis focuses on constraint retention, contradiction, coherence, and
-the natural integration of later instructions. It does not treat model family,
-parameter count, or quantization as causal variables; these are recorded as
-inference configurations for reproducibility.
+the natural integration of later instructions. Model family, parameter
+count, and quantization are recorded as inference configurations, not
+treated as causal variables.
 
-## Reproducing a model run
-
-The evaluator supports LM Studio and Ollama through their local
-OpenAI-compatible interfaces. Start with the exact installed model identifier:
+## Setup
 
 ```bash
-python3 runs/run_experiment.py --backend lmstudio --list-models
-python3 runs/run_experiment.py --backend ollama --list-models
+pip install -r requirements.txt   # datasets, huggingface_hub
 ```
 
-Then run one explicitly selected model:
+Generation runs against a local model server (LM Studio or Ollama, via
+their OpenAI-compatible endpoints). Reproducing the judging/analysis steps
+needs no local model server — only the recorded outputs and scores below.
+
+## Data
+
+The benchmark, generations, judge scores, and evaluator/human-validation
+outputs are published on Hugging Face as one dataset repo, six configs:
+
+- **[`incremental-instruction-creative-writing`](https://huggingface.co/datasets/solusops/incremental-instruction-creative-writing)**
+  — `benchmark`, `generations`, `pointwise_scores`, `pairwise_validation`,
+  `evidence_first_validation`, `human_eval`. Load any config with
+  `datasets.load_dataset(repo_id, config_name=...)`.
+
+An earlier, narrower two-repo split
+([`sister-benchmark`](https://huggingface.co/datasets/SolusOps/sister-benchmark),
+[`sister-benchmark-generations`](https://huggingface.co/datasets/SolusOps/sister-benchmark-generations))
+remains published for existing citations to it.
+
+Locally, `runs/benchmark_data.json` is the benchmark and `runs/results/`
+holds the generation records (`runs/results/index.json` carries run
+provenance: model/quant identity, seeds, and context-length handling).
+`evaluations/constraints.jsonl` holds the atomic constraints extracted from
+every task, used by the judge.
+
+## Generation
 
 ```bash
+# list installed models on your local backend
+python3 runs/run_experiment.py --backend lmstudio --list-models
+python3 runs/run_experiment.py --backend ollama --list-models
+
+# run one explicitly selected model against the benchmark
 python3 runs/run_experiment.py --backend lmstudio --models publisher/model-id
 ```
 
-## Active data
+## Evaluation methodology
 
-The current active dataset contains completed generation records for six local
-model configurations. Each active model has 320 final conditions and 1,156 raw
-records. `runs/results/index.json` records the exact model identity, quant,
-generation settings, context segments, progress, and integrity metadata;
-`all_results.jsonl` is the combined independent dataset.
+Each final generation is judged against its task's atomic constraints on a
+0 / 0.5 / 1 adherence scale (with a short reason per constraint), plus five
+anchored 1–5 creative-quality dimensions (craft, structure and coherence,
+originality, genre effectiveness, characterization). The full rubric and
+blinding contract are in `evaluations/judge_config.json`.
 
-## Datasets on Hugging Face
+`evaluations/scores.jsonl` is the canonical, validated merge of every
+judging pass, one row per final generation record; build it from the raw
+per-pass files with:
 
-This repository holds the working code and files; two of those files are
-also published on the Hub as standalone, independently versioned dataset
-repos so they can be cited and reused apart from this codebase:
+```bash
+python3 evaluations/merge_scores.py
+```
 
-- **[`sister-benchmark`](https://huggingface.co/datasets/SolusOps/sister-benchmark)**:
-  the 160-task benchmark (`runs/benchmark_data.json`). The reusable
-  artifact: load this to evaluate your own model against the same tasks.
-- **[`sister-benchmark-generations`](https://huggingface.co/datasets/SolusOps/sister-benchmark-generations)**:
-  our baseline models' raw outputs on that benchmark (`runs/results/`),
-  one split per model. Evidence for this paper, not part of the benchmark
-  definition itself.
+## Evaluator and human validation
 
-They're separate repos, not branches or configs of one repo, because they
-version independently: the benchmark grows over time (new task versions,
-tagged releases), while the generations repo grows with new experiment
-runs. See `runs/BENCHMARK.md`, `runs/results/README.md`, and
-`runs/hf_upload/README.md` for the full rationale and the push scripts.
+Two independent pairwise evaluators — a standard preference judge and an
+evidence-first evaluator that audits every constraint before choosing a
+preference — were each run in original and reversed response order over a
+fixed 30-case blind sample, to check for position bias.
+`evaluations/human_validation/` holds that sample, both evaluators' outputs,
+methodology reports, and the human-validation annotations used in the
+current study over the same sample.
 
+## Result analysis
 
+Paired statistical analysis over `evaluations/scores.jsonl` (constraint-loss
+vs. creative-quality effects across conditions) is in progress; this section
+will be filled in once that lands.
 
 ## Citation
-
-If this repository or its materials inform your work, cite the current
-manuscript as follows:
 
 ```bibtex
 @misc{incremental_instruction_creative_writing_2026,
@@ -81,3 +105,5 @@ manuscript as follows:
   note   = {Manuscript in preparation}
 }
 ```
+
+

@@ -59,18 +59,20 @@ __pycache__/
 # Temporary local human-review app and private join manifest
 /evaluations/.tmp_human_review/
 /evaluations/.tmp_pairwise_model_validation/
+/evaluations/tmp_*.md
 
-# Local agent scaffolding and machine-specific project indexes
+# Local agent scaffolding and machine-specific project indexes -- internal
+# project-management material, not needed to reproduce the study, kept out
+# of the public-facing repo state (still present locally, just untracked)
 /AGENTS.md
 /CLAUDE.md
-/.mex/AGENTS.md
-/.mex/SETUP.md
-/.mex/SYNC.md
-/.mex/config.json
-/.mex/graph.db
-/.mex/context/conventions.md
-/.mex/context/decisions.md
-/.mex/context/stack.md
-/.mex/patterns/INDEX.md
-/.mex/patterns/README.md
-/.mex/patterns/update-paper-results.md
+/.mex/
+/docs/superpowers/
+
+# Diagnostic/failed/superseded generation runs -- not part of the active
+# dataset (see runs/results/ and runs/BENCHMARK.md), kept locally for
+# reference but not published
+/runs/test/
+
+# Local working notes, not part of the study
+/extra/
