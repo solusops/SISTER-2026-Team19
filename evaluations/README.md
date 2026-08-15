@@ -20,11 +20,13 @@ edit a raw generation file.
 - `human_validation/` â€” matched 30-pair evaluator validation: sanitized
   primary and reversed case files, frozen model judgments and SHA-256
   receipts, ordinal analysis-only encoding, position-consistency results, and
-  the reproducible validation script. No human annotation export is present
-  in this repository, so human-agreement statistics remain uncomputed.
+  the reproducible validation script. The source human export is external to
+  the repository; its 11 completed cases are represented by the committed
+  agreement summary and disagreement table, while the remaining 19 cases are
+  not imputed or silently dropped from the reported denominator.
 
 ## Not yet built
 
 Pointwise-score aggregation and the full statistics/analysis layer. The
-matched pairwise human-vs-model analysis will run only when a human annotation
-export is supplied after both model passes are frozen.
+matched pairwise human-vs-model analysis is currently limited to the 11 cases
+completed in the supplied export.
