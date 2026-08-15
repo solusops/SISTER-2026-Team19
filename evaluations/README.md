@@ -24,6 +24,11 @@ edit a raw generation file.
   the repository; its 11 completed cases are represented by the committed
   agreement summary and disagreement table, while the remaining 19 cases are
   not imputed or silently dropped from the reported denominator.
+- `human_validation/evidence_first_*.jsonl` â€” a separate, fully blinded
+  evidence-first primary/reversed pairwise study on the same 30 cases. Each
+  record includes per-constraint status/evidence and eight grounded creative
+  dimensions before its final preference. Its outputs are frozen separately
+  and have not been compared with human responses.
 
 ## Not yet built
 
