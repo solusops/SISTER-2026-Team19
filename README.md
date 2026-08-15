@@ -21,41 +21,45 @@ the natural integration of later instructions. Model family, parameter
 count, and quantization are recorded as inference configurations, not
 treated as causal variables.
 
-## Setup
-
-```bash
-pip install -r requirements.txt   # datasets, huggingface_hub
-```
-
-Generation runs against a local model server (LM Studio or Ollama, via
-their OpenAI-compatible endpoints). Reproducing the judging/analysis steps
-needs no local model server — only the recorded outputs and scores below.
-
 ## Data
 
-The benchmark, generations, judge scores, and evaluator/human-validation
-outputs are published on Hugging Face as one dataset repo, seven configs:
+The benchmark, generations, and every evaluation artifact are published on
+Hugging Face as one dataset repo:
 
-- **[`incremental-instruction-creative-writing`](https://huggingface.co/datasets/solusops/incremental-instruction-creative-writing)**
-  — `benchmark`, `generations`, `pointwise_scores`, `pairwise_validation`,
-  `evidence_first_validation`, `human_eval_sample`,
-  `human_eval_annotations`. Load any config with
-  `datasets.load_dataset(repo_id, config_name=...)`.
+**[`incremental-instruction-creative-writing`](https://huggingface.co/datasets/solusops/incremental-instruction-creative-writing)**
+
+| Config | What it is |
+|---|---|
+| `benchmark` | The 160 writing tasks. |
+| `generations` | Model-generated responses, one split per baseline model. |
+| `model_evaluations` | 1,920 per-response LLM judge scores (constraint adherence + creative-quality dimensions). |
+| `judge_comparisons` | 30-pair A/B judge evaluations, primary and reversed response order. |
+| `judge_audit` | An independent evidence-first robustness evaluation over the same 30 pairs, auditing every constraint before a final preference. |
+| `human_eval_cases` | The 30 response pairs shown to human annotators. |
+| `human_eval` | The corresponding 30 human judgments. |
+
+Load any config with `datasets.load_dataset(repo_id, config_name=...)`.
 
 An earlier, narrower two-repo split
 ([`sister-benchmark`](https://huggingface.co/datasets/SolusOps/sister-benchmark),
 [`sister-benchmark-generations`](https://huggingface.co/datasets/SolusOps/sister-benchmark-generations))
 remains published for existing citations to it.
 
-Locally, `runs/benchmark_data.json` is the benchmark and `runs/results/`
-holds the generation records (`runs/results/index.json` carries run
-provenance: model/quant identity, seeds, and context-length handling).
-`evaluations/constraints.jsonl` holds the atomic constraints extracted from
-every task, used by the judge.
-
 ## Generation
 
+Generation runs against a local model server (LM Studio or Ollama, via
+their OpenAI-compatible endpoints) using only the Python standard library
+— no dependencies to install for this step.
+
 ```bash
+# fetch the benchmark tasks this script expects at runs/benchmark_data.json
+python3 -c "
+from datasets import load_dataset
+import json
+ds = load_dataset('solusops/incremental-instruction-creative-writing', 'benchmark')['tasks']
+json.dump(list(ds), open('runs/benchmark_data.json', 'w'))
+"  # needs: pip install datasets
+
 # list installed models on your local backend
 python3 runs/run_experiment.py --backend lmstudio --list-models
 python3 runs/run_experiment.py --backend ollama --list-models
@@ -70,30 +74,22 @@ Each final generation is judged against its task's atomic constraints on a
 0 / 0.5 / 1 adherence scale (with a short reason per constraint), plus five
 anchored 1–5 creative-quality dimensions (craft, structure and coherence,
 originality, genre effectiveness, characterization). The full rubric and
-blinding contract are in `evaluations/judge_config.json`.
-
-`evaluations/scores.jsonl` is the canonical, validated merge of every
-judging pass, one row per final generation record; build it from the raw
-per-pass files with:
-
-```bash
-python3 evaluations/merge_scores.py
-```
+blinding contract are published alongside the scores in the dataset repo
+(`methodology/` files, and `model_evaluations` for the scores themselves).
 
 ## Evaluator and human validation
 
-Two independent pairwise evaluators — a standard preference judge and an
-evidence-first evaluator that audits every constraint before choosing a
-preference — were each run in original and reversed response order over a
-fixed 30-case blind sample, to check for position bias.
-`evaluations/human_validation/` holds that sample, both evaluators' outputs,
-methodology reports, and the human-validation annotations used in the
-current study over the same sample.
+Two independent pairwise evaluators — a standard preference judge
+(`judge_comparisons`) and an evidence-first evaluator that audits every
+constraint before choosing a preference (`judge_audit`) — were each run in
+original and reversed response order over the same fixed 30-case sample
+also shown to human annotators (`human_eval_cases` / `human_eval`), to
+check for position bias and evaluator-human agreement.
 
 ## Result analysis
 
-Paired statistical analysis over `evaluations/scores.jsonl` (constraint-loss
-vs. creative-quality effects across conditions) is in progress; this section
+Paired statistical analysis over the judge scores (constraint-loss vs.
+creative-quality effects across conditions) is in progress; this section
 will be filled in once that lands.
 
 ## Citation

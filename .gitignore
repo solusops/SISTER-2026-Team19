@@ -56,11 +56,6 @@ __pycache__/
 /paper/main.pdf
 /paper/build/
 
-# Temporary local human-review app and private join manifest
-/evaluations/.tmp_human_review/
-/evaluations/.tmp_pairwise_model_validation/
-/evaluations/tmp_*.md
-
 # Local agent scaffolding and machine-specific project indexes -- internal
 # project-management material, not needed to reproduce the study, kept out
 # of the public-facing repo state (still present locally, just untracked)
@@ -69,10 +64,25 @@ __pycache__/
 /.mex/
 /docs/superpowers/
 
-# Diagnostic/failed/superseded generation runs -- not part of the active
-# dataset (see runs/results/ and runs/BENCHMARK.md), kept locally for
-# reference but not published
-/runs/test/
-
 # Local working notes, not part of the study
 /extra/
+
+# Everything else is local-only tooling and data that's published on
+# Hugging Face instead (SolusOps/incremental-instruction-creative-writing):
+# judging scripts, judge prompts/scores, human-validation artifacts, merge
+# and dataset-publishing scripts, the dashboard, tests, diagnostic run
+# history, and the raw benchmark/generation data itself. GitHub carries
+# only the manuscript and the generation script. All of this stays on disk,
+# just untracked -- see git history before this cleanup for what was
+# previously tracked, and .mex/ROUTER.md locally for where things live now.
+/evaluations/
+/runs/results/
+/runs/test/
+/runs/benchmark_data.json
+/runs/BENCHMARK.md
+/runs/README.md
+/runs/merge_results.py
+/runs/monitor_dashboard.py
+/runs/test_merge_results.py
+/runs/test_run_experiment.py
+/runs/hf_upload/
