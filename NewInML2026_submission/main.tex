@@ -1,0 +1,106 @@
+\documentclass{article}
+
+\usepackage[dblblindworkshop]{neurips_2026}
+\workshoptitle{New in Machine Learning (NewInML) at NeurIPS 2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{cleveref}
+
+\title{The Effects of Incremental Instruction Delivery on\\Language-Model Creative Writing}
+\author{Anonymous Authors}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+
+\end{abstract}
+
+\section{Introduction}
+Multi-turn interaction is a common way to use language models. Rather than specifying everything at once, 
+users interact with language models over multiple turns, gradually clarifying their goals, introducing additional requirements, and revising the direction of the response.
+Yet models often perform worse when the same specification is revealed incrementally rather than provided in one turn \citep{laban2025llmslostmultiturnconversation,he2024multiifbenchmarkingllmsmultiturn,li2025structflowbenchstructuredflowbenchmark}.Most existing evidence comes from settings where correctness is easy to verify objectively. These settings include exact text requirements, formatting rules, factual questions, and executable code.
+Creative writing is a different setting. Unlike tasks with a single correct answer, a story can succeed in many ways. A model may follow every explicit constraint and still produce writing that lacks coherence or originality. Giving instructions across multiple turns may cause the model to miss some requirements, but it may also change the overall structure of the story even when those requirements are satisfied. Studying these effects is difficult because writing quality cannot usually be measured with a single objective metric and instead requires human or model judgment.
+
+We compare two ways of delivering the same creative-writing instructions. In \textsc{Full}, the model receives the complete brief in a single user turn. In \textsc{Sharded}, the same brief is revealed gradually over 5--9 turns, while the model's earlier responses remain in the conversation. We study three questions: \textbf{RQ1}, does sharding reduce adherence to explicit instructions? \textbf{RQ2}, how does sharding affect craft, structure/coherence, originality, genre effectiveness, and characterization? \textbf{RQ3}, when two outputs have the same observed adherence, do differences in writing quality remain?
+
+We evaluate 160 tasks using six open-weight models, producing 960 matched \textsc{Full}/\textsc{Sharded} pairs. Presenting all instructions at once substantially improves both explicit adherence and structure/coherence. Results for the remaining quality dimensions are more varied: \textsc{Full} improves craft and genre effectiveness on average, whereas \textsc{Sharded} has a small advantage in originality. Among pairs with the same observed adherence, the craft gap disappears and several quality measures favor \textsc{Sharded}. In contrast, the advantage of \textsc{Full} in structure/coherence remains. This work contributes (i) a paired benchmark for incremental creative-writing specification, (ii) evidence that structural degradation cannot be explained only by lost constraints, and (iii) human and order-swap validation showing that automated evaluation of creative quality is considerably less well supported than automated evaluation of constraint adherence.
+
+\section{Related Work}
+
+\paragraph{Interactive creative writing.}Creative writing with language models is often iterative rather than one-shot. Systems such as Wordcraft, TaleBrush, and Dramatron let writers develop stories through repeated prompting, continuation, revision, and guidance \citep{coenen2021wordcrafthumanaicollaborativeeditor,chung2022talebrush, mirowski2022cowritingscreenplaystheatrescripts}. Related work on human--AI co-writing similarly studies how writers alternate between their own text and model suggestions \citep{Lee_2022}. These studies show that creative work naturally unfolds across multiple interactions. However, they mainly ask how AI can support writers, not whether the \emph{same intended writing specification} becomes harder for a model when it is revealed gradually across turns. Our work isolates this effect by keeping the intended task fixed and changing only how its instructions are delivered.
+\paragraph{Multi-turn instruction following.}
+Prior work shows that language models become less reliable as instructions build up across multiple turns. \citet{laban2025llmslostmultiturnconversation} compare tasks presented all at once with the same tasks revealed gradually, while Multi-IF and related benchmarks test whether models retain instructions introduced earlier in a conversation \citep{he2024multiifbenchmarkingllmsmultiturn,jia2026battleanotherprobingllms}. SEQUOR is particularly relevant because it evaluates persistent and accumulating constraints over long interactions \citep{canaverde2026sequormultiturnbenchmarkrealistic}. However, SEQUOR explicitly excludes \emph{subjective} constraints, such as requests for creative responses, because they cannot be evaluated with a simple correct/incorrect judgment. Our work studies this excluded setting: creative-writing tasks whose requirements accumulate across turns and whose final quality is inherently subjective.
+\paragraph{Evaluating creative writing.}
+There is no single objective score that fully captures the quality of creative writing. Existing work therefore considers multiple properties, such as coherence, engagement, and relevance \citep{chhun2022humancriteriaautomaticmetrics,chhun-etal-2024-language}. WritingBench uses evaluation criteria tailored to each writing prompt, whereas CreativityPrism evaluates quality, novelty, and diversity separately\citep{wu2025writingbenchcomprehensivebenchmarkgenerative,hou2026creativityprismcrossdomainevaluationframework}. LitBench further shows that even strong LLM-based evaluators only partially agree with human preferences in creative writing \citep{fein2025litbenchbenchmarkdatasetreliable}. Motivated by these findings, we evaluate instruction adherence and writing quality separately, and we validate our automated quality scores using human comparisons.
+\section{Methodology}
+
+\subsection{Problem Formulation}
+
+For task $i$ and model $m$, let $Y^F_{i,m}$ and $Y^S_{i,m}$ be the final outputs under \textsc{Full} and \textsc{Sharded}. For evaluation dimension $q$, the paired delivery effect is
+\begin{equation}
+  \delta^{(q)}_{i,m}=Q_q(Y^F_{i,m})-Q_q(Y^S_{i,m}),
+  \label{eq:delta}
+\end{equation}
+so positive values favor \textsc{Full}. Only the final response is evaluated. The equal-adherence analysis restricts to pairs with $\delta^{(\mathrm{adh})}_{i,m}=0$; because this is post-hoc conditioning on an observed outcome, it is a descriptive comparison, not randomized mediation.
+
+\subsection{Benchmark and Instruction Sharding}
+
+
+
+\subsection{Models and Generation}
+
+
+\subsection{Evaluation Protocol}
+
+
+
+\subsection{Judge Validation and Statistics}
+
+
+
+\section{Results}
+
+
+\subsection{RQ1: Constraint Adherence}
+
+
+\subsection{RQ2: Writing-Quality Dimensions}
+
+
+\subsection{RQ3: Quality at Comparable Adherence}
+
+
+\subsection{Evaluator Validity}
+
+
+
+\section{Discussion}
+
+
+\section{Limitations}
+
+
+
+\section{Conclusion}
+
+
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\clearpage
+\input{checklist}
+\input{supplement}
+\appendix
+
+\end{document}
