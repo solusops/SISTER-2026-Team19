@@ -21,10 +21,30 @@ the natural integration of later instructions. Model family, parameter
 count, and quantization are recorded as inference configurations, not
 treated as causal variables.
 
-## Data
+## What this repository contains
 
-The benchmark, generations, and every evaluation artifact are published on
-Hugging Face as one dataset repo:
+This is the legacy SISTER reproducibility repository. It deliberately contains
+no benchmark tasks, model generations, human annotations, judge scores, batch
+inputs or outputs, manuscript source, figures, or PDF-build workflow.
+
+The retained materials are the scripts and instructions needed to reproduce
+the study workflow with independently obtained data:
+
+- `runs/run_experiment.py` runs the FULL and incremental-instruction
+  generation protocol against a local LM Studio or Ollama server.
+- `runs/merge_results.py` validates and merges separately produced result
+  directories.
+- `evaluations/prepare_native_judge_batches.mjs` and the accompanying worker
+  instructions define blinded automated-evaluation inputs.
+- `evaluations/merge_scores.py` validates and combines score exports.
+- `evaluations/human_validation/` contains the two pairwise-evaluator
+  protocols, and `analysis/analyze_human_model_agreement.py` analyzes their
+  agreement with a supplied human-judgment export.
+
+## Published data (not stored here)
+
+The benchmark, generations, and evaluation artifacts are published separately
+on Hugging Face as one dataset repository:
 
 **[`incremental-instruction-creative-writing`](https://huggingface.co/datasets/solusops/incremental-instruction-creative-writing)**
 
@@ -102,14 +122,24 @@ will be filled in further once that lands.
 
 ## Acknowledgements
 
-This work began in Synthica's SISTER program, where it placed among the top
-six projects in the AI/ML track. Special thanks to Abrar Eyasir for early
-project guidance in a PI-like role. Anshuman Singh led the research and paper
-development.
+This work was undertaken in the Artificial Intelligence/Machine Learning
+track of Synthica's SISTER (Summer Institute of Science, Technology, and
+Engineering Research) program, held from June 29 to August 2, 2026. It placed
+among the top six projects in that track. Anshuman Singh led the research and
+manuscript development. Special thanks to Abrar Eyasir for PI-like early
+project guidance, including coordination of the related-work effort and group
+meetings. Haseeb Yaqoob and John Manavalan were members of the research group;
+their participation in the related-work effort and research meetings is
+gratefully acknowledged.
 
 ## Credits
 
 - **Research and paper lead:** Anshuman Singh
 - **Human annotation:** Abrar Eyasir, Haseeb Yaqoob, and John Manavalan
 
+## Rights and access
 
+This repository is not offered under an open-source or Creative Commons
+license. The retained scripts and documentation are subject to the
+[SISTER Research Software Notice](LICENSE). The dataset has its own terms on
+Hugging Face.
