@@ -100,15 +100,16 @@ Paired statistical analysis over the judge scores (constraint-loss vs.
 creative-quality effects across conditions) is in progress; this section
 will be filled in further once that lands.
 
-## Citation
+## Acknowledgements
 
-```bibtex
-@misc{incremental_instruction_creative_writing_2026,
-  title  = {The Effects of Incremental Instruction Delivery on Language-Model Creative Writing},
-  author = {Anshuman Singh and Abrar Eyasir and Haseeb Yaqoob and John Manavalan},
-  year   = {2026},
-  note   = {Manuscript in preparation}
-}
-```
+This work began in Synthica's SISTER program, where it placed among the top
+six projects in the AI/ML track. Special thanks to Abrar Eyasir for early
+project guidance in a PI-like role. Anshuman Singh led the research and paper
+development.
+
+## Credits
+
+- **Research and paper lead:** Anshuman Singh
+- **Human annotation:** Abrar Eyasir, Haseeb Yaqoob, and John Manavalan
 
 
