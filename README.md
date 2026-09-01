@@ -90,10 +90,13 @@ among the top six projects in that track.
 
 Manuscript authorship, in order, is Anshuman Singh, Abrar Eyasir, Haseeb
 Yaqoob, and John Manavalan. Anshuman Singh led the research and manuscript
-development. Abrar Eyasir contributed to the project's early planning and
-methodology. All four authors participated in the related-work effort; Haseeb
-Yaqoob and John Manavalan also contributed through research-group meetings.
-Abrar Eyasir, Haseeb Yaqoob, and John Manavalan contributed human annotations.
+development. Abrar Eyasir shaped the research direction, acted in a PI-like
+role, contributed to the early methodology, mentored Haseeb Yaqoob and John
+Manavalan, and oversaw the related-work effort and work distribution. Haseeb
+Yaqoob and John Manavalan contributed human annotations, manuscript feedback,
+and related-work material. This international research group was formed for
+the SISTER collaboration; gratitude is extended to everyone whose work made
+the research possible.
 
 ## Rights and access
 
