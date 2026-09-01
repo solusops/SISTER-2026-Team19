@@ -39,9 +39,10 @@ validation, and analysis tooling:
 
 ## Generation
 
-Generation runs against a local model server (LM Studio or Ollama, via
-their OpenAI-compatible endpoints) using only the Python standard library
-— no dependencies to install for this step.
+Generation for this study was run exclusively through LM Studio's local
+OpenAI-compatible endpoint. For reproduction, the script also supports
+Ollama-compatible endpoints. It uses only the Python standard library — no
+dependencies are required for this step.
 
 ```bash
 # list installed models on your local backend
