@@ -81,22 +81,19 @@ reversed presentation order for position-bias checks.
 agreement plus weighted Cohen's kappa between supplied human and evaluator
 judgments.
 
-## Acknowledgements
+## Contributors and acknowledgements
 
 This work was undertaken in the Artificial Intelligence/Machine Learning
 track of Synthica's SISTER (Summer Institute of Science, Technology, and
 Engineering Research) program, held from June 29 to August 2, 2026. It placed
-among the top six projects in that track. Anshuman Singh led the research and
-manuscript development. Special thanks to Abrar Eyasir for PI-like early
-project guidance, including coordination of the related-work effort and group
-meetings. Haseeb Yaqoob and John Manavalan were members of the research group;
-their participation in the related-work effort and research meetings is
-gratefully acknowledged.
+among the top six projects in that track.
 
-## Credits
-
-- **Research and paper lead:** Anshuman Singh
-- **Human annotation:** Abrar Eyasir, Haseeb Yaqoob, and John Manavalan
+Manuscript authorship, in order, is Anshuman Singh, Abrar Eyasir, Haseeb
+Yaqoob, and John Manavalan. Anshuman Singh led the research and manuscript
+development. Abrar Eyasir contributed to the project's early planning and
+methodology. All four authors participated in the related-work effort; Haseeb
+Yaqoob and John Manavalan also contributed through research-group meetings.
+Abrar Eyasir, Haseeb Yaqoob, and John Manavalan contributed human annotations.
 
 ## Rights and access
 
