@@ -89,14 +89,17 @@ Engineering Research) program, held from June 29 to August 2, 2026. It placed
 among the top six projects in that track.
 
 Manuscript authorship, in order, is Anshuman Singh, Abrar Eyasir, Haseeb
-Yaqoob, and John Manavalan. Anshuman Singh led the research and manuscript
-development. Abrar Eyasir shaped the research direction, acted in a PI-like
-role, contributed to the early methodology, mentored Haseeb Yaqoob and John
-Manavalan, and oversaw the related-work effort and work distribution. Haseeb
-Yaqoob and John Manavalan contributed human annotations, manuscript feedback,
-and related-work material. This international research group was formed for
-the SISTER collaboration; gratitude is extended to everyone whose work made
-the research possible.
+Yaqoob, and John Manavalan. Special thanks to Abrar Eyasir for shaping the
+early research direction, acting in a PI-like role, and finding out the
+literature gap for a proper contribution. His work also involved the early
+methodology, mentorship of Haseeb Yaqoob and John Manavalan, and overseeing the
+related-work effort and work distribution. Anshuman Singh oversaw and took
+ownership of the eventual methodology, dataset generation and handling,
+research-question crystallization, and manuscript writing. Haseeb Yaqoob and
+John Manavalan contributed human annotations under Abrar and Anshuman,
+manuscript feedback, and related-work material under Abrar. This international
+research group was formed for the SISTER collaboration; gratitude is extended
+to everyone whose work made the research possible.
 
 ## Rights and access
 
