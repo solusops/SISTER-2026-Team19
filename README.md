@@ -100,6 +100,5 @@ gratefully acknowledged.
 
 ## Rights and access
 
-This repository is not offered under an open-source or Creative Commons
-license. The retained scripts and documentation are subject to the
+The retained scripts and documentation are subject to the
 [SISTER Research Software Notice](LICENSE).
