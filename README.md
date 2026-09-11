@@ -1,6 +1,6 @@
 # The Effects of Incremental Instruction Delivery on Language-Model Creative Writing
 
-[![DOI](https://zenodo.org/badge/1324211602.svg)](https://doi.org/10.5281/zenodo.22700810)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.22700810-blue)](https://doi.org/10.5281/zenodo.22700810)
 
 Does splitting a story's instructions across a conversation, instead of
 giving them all at once, change what a language model writes?
@@ -108,3 +108,22 @@ to everyone whose work made the research possible.
 
 The retained scripts and documentation are subject to the
 [SISTER Research Software Notice](LICENSE).
+
+## Paper
+
+**The Effects of Incremental Instruction Delivery on Language-Model Creative Writing**
+
+Anshuman Singh, Abrar Eyasir, Haseeb Yaqoob, and John Manavalan, 2026.
+
+[Preprint](https://doi.org/10.5281/zenodo.22700810)
+
+If you use this work, please cite:
+
+```bibtex
+@article{singh2026incremental,
+  title   = {The Effects of Incremental Instruction Delivery on Language-Model Creative Writing},
+  author  = {Singh, Anshuman and Eyasir, Abrar and Yaqoob, Haseeb and Manavalan, John},
+  year    = {2026},
+  doi     = {10.5281/zenodo.22700810},
+  url     = {https://doi.org/10.5281/zenodo.22700810}
+}
