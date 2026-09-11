@@ -1,23 +1,19 @@
 cff-version: 1.2.0
-message: "If you use this repository, please cite the paper below."
+message: "If you use this work, please cite the paper below."
 
-title: "SISTER"
-type: software
+title: "The Effects of Incremental Instruction Delivery on Language-Model Creative Writing"
+type: article
 
 authors:
   - family-names: "Singh"
     given-names: "Anshuman"
+  - family-names: "Eyasir"
+    given-names: "Abrar"
+  - family-names: "Yaqoob"
+    given-names: "Haseeb"
+  - family-names: "Manavalan"
+    given-names: "John"
 
-repository-code: "https://github.com/solusops/SISTER"
-
-preferred-citation:
-  type: article
-  title: "The Effects of Incremental Instruction Delivery on Language-Model Creative Writing"
-  authors:
-    - family-names: "Singh"
-      given-names: "Anshuman"
-    # Add the remaining authors here in the exact paper order
-
-  year: 2026
-  doi: "10.5281/zenodo.22700810"
-  url: "https://doi.org/10.5281/zenodo.22700810"
+year: 2026
+doi: "10.5281/zenodo.22700810"
+url: "https://doi.org/10.5281/zenodo.22700810"
