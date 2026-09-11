@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+title: "The Effects of Incremental Instruction Delivery on Language-Model Creative Writing"
+type: article
+authors:
+  - family-names: "Singh"
+    given-names: "Anshuman"
+  - family-names: "Eyasir"
+    given-names: "Abrar"
+  - family-names: "Yaqoob"
+    given-names: "Haseeb"
+  - family-names: "Manavalan"
+    given-names: "John"
+year: 2026
+doi: "10.5281/zenodo.22700810"
+url: "https://doi.org/10.5281/zenodo.22700810"
+repository-code: "https://github.com/solusops/SISTER"
+license: "CC-BY-4.0"
