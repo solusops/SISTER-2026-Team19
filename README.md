@@ -2,8 +2,6 @@
 
 [![DOI](https://zenodo.org/badge/1324211602.svg)](https://doi.org/10.5281/zenodo.22700810)
 
-[![DOI](https://zenodo.org/badge/1324211602.svg)](https://doi.org/10.5281/zenodo.21951540)
-
 Does splitting a story's instructions across a conversation, instead of
 giving them all at once, change what a language model writes?
 
